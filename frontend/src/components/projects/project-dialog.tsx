@@ -107,7 +107,7 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: Props) {
           {project && (
             <div className="flex flex-col gap-1.5">
               <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus}>
+              <Select value={status} onValueChange={(v) => { if (v) setStatus(v); }}>
                 <SelectTrigger className="bg-background">
                   <SelectValue />
                 </SelectTrigger>

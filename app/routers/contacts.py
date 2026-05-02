@@ -12,8 +12,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.database.models import Contact
+from app.database.models import Contact, Employee
 from app.database.repository import Repository
+from app.services.auth_service import require_admin
 
 router = APIRouter()
 
@@ -76,7 +77,7 @@ async def list_contacts(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/contacts", response_model=ContactResponse)
-async def create_contact(req: ContactCreate, db: AsyncSession = Depends(get_db)):
+async def create_contact(req: ContactCreate, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
     repo = Repository(db)
     contact = Contact(**req.model_dump())
     contact = await repo.create(contact)
@@ -89,6 +90,7 @@ async def update_contact(
     contact_id: uuid.UUID,
     req: ContactUpdate,
     db: AsyncSession = Depends(get_db),
+    _admin: Employee = Depends(require_admin),
 ):
     repo = Repository(db)
     fields = {k: v for k, v in req.model_dump().items() if v is not None}
@@ -102,7 +104,7 @@ async def update_contact(
 
 
 @router.delete("/contacts/{contact_id}")
-async def delete_contact(contact_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def delete_contact(contact_id: uuid.UUID, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
     repo = Repository(db)
     deleted = await repo.delete_by_id(Contact, contact_id)
     if not deleted:

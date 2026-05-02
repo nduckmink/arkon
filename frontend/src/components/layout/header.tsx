@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { label: "Departments", href: "/departments", icon: "business", adminOnly: true },
   { label: "Employees", href: "/employees", icon: "group", adminOnly: true },
   { label: "Contacts", href: "/contacts", icon: "contacts" },
+  { label: "Search Preview", href: "/search-preview", icon: "manage_search", adminOnly: true },
   { label: "Settings", href: "/settings", icon: "settings", adminOnly: true },
 ];
 

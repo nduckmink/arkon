@@ -5,27 +5,28 @@ import { api } from "@/lib/api";
 import { PageHeader } from "@/components/shared/page-header";
 import { ProviderConfigCard } from "@/components/settings/provider-config-card";
 
+// Keys must match ALL_CONFIG_KEYS in app/services/config_service.py
 type ProviderConfig = {
   embedding_provider: string;
-  embedding_model: string;
+  embedding_model_id: string;
   embedding_api_key: string;
   llm_provider: string;
-  llm_model: string;
+  llm_model_id: string;
   llm_api_key: string;
   vision_provider: string;
-  vision_model: string;
+  vision_model_id: string;
   vision_api_key: string;
 };
 
 const defaultConfig: ProviderConfig = {
   embedding_provider: "",
-  embedding_model: "",
+  embedding_model_id: "",
   embedding_api_key: "",
   llm_provider: "",
-  llm_model: "",
+  llm_model_id: "",
   llm_api_key: "",
   vision_provider: "",
-  vision_model: "",
+  vision_model_id: "",
   vision_api_key: "",
 };
 
@@ -39,8 +40,11 @@ export default function SettingsPage() {
   useEffect(() => {
     async function load() {
       try {
-        const data = await api<ProviderConfig>("/api/settings");
-        setConfig({ ...defaultConfig, ...data });
+        const data = await api<Record<string, unknown>>("/api/settings");
+        const coerced = Object.fromEntries(
+          Object.keys(defaultConfig).map((k) => [k, String(data[k] ?? "")])
+        ) as ProviderConfig;
+        setConfig(coerced);
       } catch {
         // Use defaults
       } finally {
@@ -55,7 +59,14 @@ export default function SettingsPage() {
     setSaved(false);
     setSaveError("");
     try {
-      await api("/api/settings", { method: "PUT", body: config });
+      const settings: Record<string, string> = {};
+      for (const [k, v] of Object.entries(config)) {
+        const str = typeof v === "string" ? v : "";
+        // Skip masked values — server already has them stored
+        if (str && !str.startsWith("•")) settings[k] = str;
+        else if (!str) settings[k] = "";
+      }
+      await api("/api/settings", { method: "PUT", body: { settings } });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
@@ -92,10 +103,10 @@ export default function SettingsPage() {
           description="Used to generate vector embeddings for document search"
           icon="data_array"
           provider={config.embedding_provider}
-          model={config.embedding_model}
+          model={config.embedding_model_id}
           apiKey={config.embedding_api_key}
           onProviderChange={(v) => updateField("embedding_provider", v)}
-          onModelChange={(v) => updateField("embedding_model", v)}
+          onModelChange={(v) => updateField("embedding_model_id", v)}
           onApiKeyChange={(v) => updateField("embedding_api_key", v)}
         />
 
@@ -104,10 +115,10 @@ export default function SettingsPage() {
           description="Used for AI-powered analysis and summarization"
           icon="psychology"
           provider={config.llm_provider}
-          model={config.llm_model}
+          model={config.llm_model_id}
           apiKey={config.llm_api_key}
           onProviderChange={(v) => updateField("llm_provider", v)}
-          onModelChange={(v) => updateField("llm_model", v)}
+          onModelChange={(v) => updateField("llm_model_id", v)}
           onApiKeyChange={(v) => updateField("llm_api_key", v)}
         />
 
@@ -116,10 +127,10 @@ export default function SettingsPage() {
           description="Optional — used for image analysis in documents"
           icon="visibility"
           provider={config.vision_provider}
-          model={config.vision_model}
+          model={config.vision_model_id}
           apiKey={config.vision_api_key}
           onProviderChange={(v) => updateField("vision_provider", v)}
-          onModelChange={(v) => updateField("vision_model", v)}
+          onModelChange={(v) => updateField("vision_model_id", v)}
           onApiKeyChange={(v) => updateField("vision_api_key", v)}
         />
 

@@ -73,8 +73,6 @@ async def update_settings(
 
     svc = ConfigService(db)
     results = await svc.set_batch(body.settings)
-    await db.commit()
-
     return {"updated": results}
 
 

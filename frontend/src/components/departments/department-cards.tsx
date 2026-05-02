@@ -1,8 +1,10 @@
 "use client";
 
+import React from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ScopeDialog } from "@/components/shared/scope-dialog";
 
 type Department = {
   id: string;
@@ -19,6 +21,8 @@ type Props = {
 };
 
 export function DepartmentCards({ departments, loading, onEdit, onRefresh }: Props) {
+  const [scopeDept, setScopeDept] = React.useState<Department | null>(null);
+
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this department and all its employees?")) return;
     await api(`/api/departments/${id}`, { method: "DELETE" });
@@ -80,6 +84,15 @@ export function DepartmentCards({ departments, loading, onEdit, onRefresh }: Pro
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => setScopeDept(dept)}
+              className="text-xs"
+            >
+              <span className="material-symbols-outlined text-sm mr-1">lock</span>
+              Access
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => onEdit(dept)}
               className="text-xs"
             >
@@ -98,6 +111,15 @@ export function DepartmentCards({ departments, loading, onEdit, onRefresh }: Pro
           </div>
         </div>
       ))}
+
+      {scopeDept && (
+        <ScopeDialog
+          open={!!scopeDept}
+          onOpenChange={(open) => { if (!open) setScopeDept(null); }}
+          label={scopeDept.name}
+          departmentId={scopeDept.id}
+        />
+      )}
     </div>
   );
 }

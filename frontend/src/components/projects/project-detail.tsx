@@ -206,7 +206,7 @@ export function ProjectDetail({ project, isAdmin, onBack }: Props) {
         <div className="flex flex-col gap-4">
           {isAdmin && (
             <div className="bg-card rounded-xl border border-border shadow-sahara p-4 flex gap-2">
-              <Select value={selectedEmpId} onValueChange={setSelectedEmpId}>
+              <Select value={selectedEmpId} onValueChange={(v) => setSelectedEmpId(v ?? "")}>
                 <SelectTrigger className="bg-background flex-1">
                   <SelectValue placeholder="Select employee to add..." />
                 </SelectTrigger>
@@ -263,7 +263,7 @@ export function ProjectDetail({ project, isAdmin, onBack }: Props) {
         <div className="flex flex-col gap-4">
           {isAdmin && (
             <div className="bg-card rounded-xl border border-border shadow-sahara p-4 flex gap-2">
-              <Select value={selectedSourceId} onValueChange={setSelectedSourceId}>
+              <Select value={selectedSourceId} onValueChange={(v) => setSelectedSourceId(v ?? "")}>
                 <SelectTrigger className="bg-background flex-1">
                   <SelectValue placeholder="Select document to add..." />
                 </SelectTrigger>

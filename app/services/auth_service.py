@@ -123,7 +123,12 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
 
-    employee = await db.get(Employee, uuid.UUID(payload["sub"]))
+    result = await db.execute(
+        select(Employee)
+        .options(selectinload(Employee.department))
+        .where(Employee.id == uuid.UUID(payload["sub"]))
+    )
+    employee = result.scalar_one_or_none()
     if not employee or not employee.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -8,7 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import { api, setToken, clearToken } from "@/lib/api";
+import { api, setToken, clearToken, ApiError } from "@/lib/api";
 
 export type User = {
   id: string;
@@ -44,9 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         department_name: string;
       }>("/api/auth/me");
       setUser(data);
-    } catch {
+    } catch (err) {
       setUser(null);
-      clearToken();
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        clearToken();
+      }
     } finally {
       setLoading(false);
     }

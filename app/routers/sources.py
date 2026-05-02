@@ -355,6 +355,63 @@ async def update_source(
     return _to_response(source, cc, ic)
 
 
+# --- Re-ingest source ---
+@router.post("/sources/{source_id}/reingest", response_model=SourceResponse)
+async def reingest_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _admin: Employee = Depends(require_admin),
+):
+    """Re-queue ingestion for a source. Clears existing chunks and re-processes."""
+    result = await db.execute(
+        select(Source)
+        .options(selectinload(Source.knowledge_type), selectinload(Source.department))
+        .where(Source.id == source_id)
+    )
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    if source.source_type == "url" and not source.url:
+        raise HTTPException(status_code=400, detail="Source has no URL to re-ingest")
+    if source.source_type == "file" and not source.minio_key:
+        raise HTTPException(status_code=400, detail="Source file not found in storage")
+
+    # Delete existing chunks so re-ingestion starts clean
+    await db.execute(
+        select(SourceChunk).where(SourceChunk.source_id == source_id)
+    )
+    from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(SourceChunk).where(SourceChunk.source_id == source_id))
+    await db.execute(sql_delete(SourceInsight).where(SourceInsight.source_id == source_id))
+
+    source.status = "pending"
+    source.progress = 0
+    source.progress_message = "Queued for re-ingestion..."
+    source.error_message = None
+    await db.flush()
+
+    pool = await get_arq_pool()
+    if source.source_type == "url":
+        job = await pool.enqueue_job("ingest_url_task", str(source_id))
+    else:
+        job = await pool.enqueue_job("reingest_file_task", str(source_id))
+
+    source.job_id = job.job_id
+    await db.commit()
+
+    await db.refresh(source)
+    result2 = await db.execute(
+        select(Source)
+        .options(selectinload(Source.knowledge_type), selectinload(Source.department))
+        .where(Source.id == source_id)
+    )
+    source = result2.scalar_one()
+
+    logger.info(f"Queued re-ingestion job {job.job_id} for source {source_id}")
+    return _to_response(source)
+
+
 # --- Delete source ---
 @router.delete("/sources/{source_id}")
 async def delete_source(

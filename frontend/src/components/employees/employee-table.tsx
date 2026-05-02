@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ScopeDialog } from "@/components/shared/scope-dialog";
 
 type Employee = {
   id: string;
@@ -48,6 +49,7 @@ type Props = {
 export function EmployeeTable({ employees, loading, onEdit, onRefresh }: Props) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [tokenDialog, setTokenDialog] = useState<{ token: string; instructions: string } | null>(null);
+  const [scopeEmployee, setScopeEmployee] = useState<Employee | null>(null);
 
   const handleToggle = async (id: string) => {
     setActionError(null);
@@ -193,6 +195,10 @@ export function EmployeeTable({ employees, loading, onEdit, onRefresh }: Props) 
                         <span className="material-symbols-outlined text-base mr-2">edit</span>
                         Edit
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setScopeEmployee(emp)}>
+                        <span className="material-symbols-outlined text-base mr-2">lock</span>
+                        Personal Access
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => handleToggle(emp.id)}>
                         <span className="material-symbols-outlined text-base mr-2">
                           {emp.is_active ? "person_off" : "person"}
@@ -227,6 +233,15 @@ export function EmployeeTable({ employees, loading, onEdit, onRefresh }: Props) 
           </TableBody>
         </Table>
       </div>
+
+      {scopeEmployee && (
+        <ScopeDialog
+          open={!!scopeEmployee}
+          onOpenChange={(open) => { if (!open) setScopeEmployee(null); }}
+          label={scopeEmployee.name}
+          employeeId={scopeEmployee.id}
+        />
+      )}
 
       <Dialog open={!!tokenDialog} onOpenChange={() => setTokenDialog(null)}>
         <DialogContent className="sm:max-w-lg">

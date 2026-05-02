@@ -170,16 +170,12 @@ class ConfigService:
             if key not in ALL_CONFIG_KEYS:
                 results[key] = False
                 continue
-            try:
-                # Skip masked values (user didn't change them)
-                if value and value.startswith("••••"):
-                    results[key] = True
-                    continue
-                await self.set(key, value)
+            # Skip masked values (user didn't change them)
+            if value and value.startswith("••••"):
                 results[key] = True
-            except Exception as e:
-                logger.error(f"Failed to set config {key}: {e}")
-                results[key] = False
+                continue
+            await self.set(key, value)
+            results[key] = True
         return results
 
 

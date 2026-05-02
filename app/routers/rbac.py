@@ -326,6 +326,29 @@ async def get_department_scopes(
     ]
 
 
+@router.get("/employees/{emp_id}/scopes")
+async def get_employee_scopes(
+    emp_id: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: Employee = Depends(require_admin),
+):
+    """Get personal knowledge scopes for an employee."""
+    stmt = select(KnowledgeScope).where(
+        KnowledgeScope.employee_id == uuid.UUID(emp_id),
+    )
+    result = await db.execute(stmt)
+    scopes = result.scalars().all()
+    return [
+        {
+            "id": str(s.id),
+            "scope_type": s.scope_type,
+            "knowledge_type_slugs": s.knowledge_type_slugs,
+            "source_ids": s.source_ids,
+        }
+        for s in scopes
+    ]
+
+
 @router.post("/scopes", status_code=201)
 async def create_scope(
     body: ScopeCreate,

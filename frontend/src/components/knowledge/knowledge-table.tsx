@@ -25,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -87,6 +88,7 @@ function getFileExt(source: Source): string {
 export function KnowledgeTable({ sources, types, departments, loading, onRefresh }: Props) {
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [editSource, setEditSource] = React.useState<Source | null>(null);
+  const [reingestingIds, setReingestingIds] = React.useState<Set<string>>(new Set());
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this document? This cannot be undone.")) return;
@@ -96,6 +98,19 @@ export function KnowledgeTable({ sources, types, departments, loading, onRefresh
       onRefresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
+  const handleReingest = async (id: string) => {
+    setActionError(null);
+    setReingestingIds((prev) => new Set(prev).add(id));
+    try {
+      await api(`/api/sources/${id}/reingest`, { method: "POST" });
+      onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to re-ingest");
+    } finally {
+      setReingestingIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
     }
   };
 
@@ -193,6 +208,16 @@ export function KnowledgeTable({ sources, types, departments, loading, onRefresh
                         <span className="material-symbols-outlined text-base mr-2">edit</span>
                         Edit
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handleReingest(source.id)}
+                        disabled={reingestingIds.has(source.id) || source.status === "processing" || source.status === "pending"}
+                      >
+                        <span className={`material-symbols-outlined text-base mr-2 ${reingestingIds.has(source.id) ? "animate-spin" : ""}`}>
+                          refresh
+                        </span>
+                        {reingestingIds.has(source.id) ? "Re-ingesting..." : "Re-ingest"}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={() => handleDelete(source.id)}
                         className="text-destructive"
@@ -296,7 +321,7 @@ function EditSourceDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label>Knowledge Type</Label>
-            <Select value={typeId} onValueChange={setTypeId}>
+            <Select value={typeId} onValueChange={(v) => setTypeId(v ?? "")}>
               <SelectTrigger className="bg-background">
                 <SelectValue placeholder="No type" />
               </SelectTrigger>
@@ -316,7 +341,7 @@ function EditSourceDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label>Department</Label>
-            <Select value={deptId} onValueChange={setDeptId}>
+            <Select value={deptId} onValueChange={(v) => setDeptId(v ?? "")}>
               <SelectTrigger className="bg-background">
                 <SelectValue placeholder="No department" />
               </SelectTrigger>

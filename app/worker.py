@@ -375,6 +375,25 @@ async def ingest_url_task(ctx: dict, source_id: str):
             raise
 
 
+async def reingest_file_task(ctx: dict, source_id: str):
+    """arq task: re-ingest a file already stored in MinIO."""
+    from app.database import async_session_factory
+    from app.database.models import Source
+    from app.services.storage_service import storage_service
+
+    sid = uuid.UUID(source_id)
+
+    async with async_session_factory() as session:
+        source = await session.get(Source, sid)
+        if not source or not source.minio_key:
+            raise ValueError(f"Source {source_id} not found or has no file")
+
+        file_data = storage_service.download_file(source.minio_key)
+        file_name = source.file_name or source.minio_key.split("/")[-1]
+
+    await ingest_file_task(ctx, source_id, file_data, file_name)
+
+
 # ---------------------------------------------------------------------------
 # Worker configuration
 # ---------------------------------------------------------------------------
@@ -382,7 +401,7 @@ async def ingest_url_task(ctx: dict, source_id: str):
 class WorkerSettings:
     """arq worker configuration."""
 
-    functions = [ingest_file_task, ingest_url_task]
+    functions = [ingest_file_task, ingest_url_task, reingest_file_task]
     redis_settings = _get_redis_settings()
     max_jobs = settings.worker_max_jobs
     job_timeout = settings.worker_job_timeout
