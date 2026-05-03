@@ -44,10 +44,6 @@ class Settings(BaseSettings):
     minio_secure: bool = Field(default=False)
     minio_presign_expiry_hours: int = Field(default=24)
 
-    # --- Chunking ---
-    chunk_size: int = Field(default=1500)
-    chunk_overlap: int = Field(default=150)
-
     # --- CORS ---
     cors_origins: str = Field(default="*")
 
@@ -58,12 +54,6 @@ class Settings(BaseSettings):
     redis_db: int = Field(default=0)
     worker_max_jobs: int = Field(default=3, description="Max concurrent ingestion jobs")
     worker_job_timeout: int = Field(default=600, description="Job timeout in seconds")
-
-    # --- Neo4j (Knowledge Graph) ---
-    neo4j_uri: str = Field(default="bolt://localhost:7687", description="Neo4j Bolt URI")
-    neo4j_user: str = Field(default="neo4j", description="Neo4j username")
-    neo4j_password: str = Field(default="neo4j", description="Neo4j password")
-    enable_entity_extraction: bool = Field(default=False, description="Auto-extract entities during ingestion")
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

@@ -55,8 +55,6 @@ ALL_CONFIG_KEYS = [
     "vision_base_url",          # Custom endpoint
 
     # --- System ---
-    "chunk_size",
-    "chunk_overlap",
     "session_timeout_minutes",
 ]
 

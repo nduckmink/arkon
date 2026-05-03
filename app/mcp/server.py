@@ -38,10 +38,14 @@ def create_mcp_server() -> FastMCP:
     mcp = FastMCP(
         "Arkon",
         instructions=(
-            "You are connected to Arkon — an enterprise Knowledge Base. "
-            "Use the available tools to search internal documents, "
-            "retrieve specific knowledge, find relevant contacts, "
-            "and browse categories. Always cite sources when answering."
+            "You are connected to Arkon — an enterprise LLM Wiki. "
+            "Knowledge is organized as interlinked markdown wiki pages compiled from "
+            "source documents. Start with `search_wiki` or `read_wiki_index` for most "
+            "questions; the wiki already synthesizes information across many sources, "
+            "so a single page often answers cross-document questions. Drill into raw "
+            "sources via `get_source_outline` and `get_source_pages` only when you need "
+            "exact citations or details the wiki has paraphrased. "
+            "Cite slugs (wiki) and source IDs (raw) when answering."
         ),
     )
 

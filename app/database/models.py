@@ -9,9 +9,9 @@ from typing import Optional
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DateTime,
-    Enum as PgEnum,
     ForeignKey,
     Index,
+    PrimaryKeyConstraint,
     String,
     Text,
     Integer,
@@ -28,7 +28,7 @@ class Base(DeclarativeBase):
 
 
 # ---------------------------------------------------------------------------
-# Sources & Knowledge Base
+# Sources — raw documents (file/URL)
 # ---------------------------------------------------------------------------
 
 class Source(Base):
@@ -48,6 +48,10 @@ class Source(Base):
         UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"),
         nullable=True,
     )
+    contributed_by_employee_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     file_path: Mapped[Optional[str]] = mapped_column(String(1000))
     url: Mapped[Optional[str]] = mapped_column(String(2000))
     minio_key: Mapped[Optional[str]] = mapped_column(String(500))
@@ -58,6 +62,12 @@ class Source(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     progress_message: Mapped[Optional[str]] = mapped_column(String(500))
     job_id: Mapped[Optional[str]] = mapped_column(String(200))
+    # Heading-based TOC tree (PageIndex-style) built at ingest time from extracted markdown.
+    # Schema: [{"title": str, "level": int, "page": int, "char_start": int, "char_end": int, "children": [...]}]
+    outline_json: Mapped[Optional[list]] = mapped_column(JSONB)
+    # Char offset (in full_text) where each extracted page begins.
+    # Used by MCP `get_source_pages` to slice raw text by page range.
+    page_offsets: Mapped[Optional[list[int]]] = mapped_column(JSONB)
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -69,91 +79,65 @@ class Source(Base):
     # Relationships
     department: Mapped[Optional["Department"]] = relationship(back_populates="sources")
     knowledge_type: Mapped[Optional["KnowledgeType"]] = relationship()
-    chunks: Mapped[list["SourceChunk"]] = relationship(
-        back_populates="source", cascade="all, delete-orphan"
-    )
-    insights: Mapped[list["SourceInsight"]] = relationship(
-        back_populates="source", cascade="all, delete-orphan"
-    )
-    images: Mapped[list["ChunkImage"]] = relationship(
-        back_populates="source", cascade="all, delete-orphan",
-        foreign_keys="ChunkImage.source_id",
+    contributor: Mapped[Optional["Employee"]] = relationship(
+        foreign_keys=[contributed_by_employee_id]
     )
 
 
-class SourceChunk(Base):
-    __tablename__ = "source_chunks"
+# ---------------------------------------------------------------------------
+# Wiki — LLM-compiled persistent knowledge layer
+# ---------------------------------------------------------------------------
+
+class WikiPage(Base):
+    """
+    A markdown wiki page maintained by the LLM Wiki Compiler.
+    Reserved slugs: '_index' (catalog), '_log' (chronological activity log).
+    """
+    __tablename__ = "wiki_pages"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    source_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE")
+    slug: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    page_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    content_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    knowledge_type_slugs: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False, default=list,
     )
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding = mapped_column(Vector(768))  # pgvector — truncated from text-embedding-004
-    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
-    page_number: Mapped[Optional[int]] = mapped_column(Integer)
+    source_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list,
+    )
+    embedding = mapped_column(Vector(768), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-
-    # Relationships
-    source: Mapped["Source"] = relationship(back_populates="chunks")
-    images: Mapped[list["ChunkImage"]] = relationship(
-        back_populates="chunk", cascade="all, delete-orphan"
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     __table_args__ = (
-        Index("ix_source_chunks_source_id", "source_id"),
+        Index("ix_wiki_pages_page_type", "page_type"),
     )
 
 
-class SourceInsight(Base):
-    __tablename__ = "source_insights"
+class WikiLink(Base):
+    """
+    Derived edge between two wiki pages, parsed from `[[slug]]` patterns in content_md.
+    Refreshed after every page upsert by wiki_service.refresh_links().
+    Replaces a dedicated graph DB for 1-2 hop queries (backlinks, neighborhood).
+    """
+    __tablename__ = "wiki_links"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    source_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE")
-    )
-    insight_type: Mapped[str] = mapped_column(String(100))
-    content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    source: Mapped["Source"] = relationship(back_populates="insights")
-
-
-class ChunkImage(Base):
-    """Images extracted from documents, mapped to text chunks."""
-    __tablename__ = "chunk_images"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    chunk_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("source_chunks.id", ondelete="CASCADE")
-    )
-    source_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE")
-    )
-    minio_key: Mapped[str] = mapped_column(String(500), nullable=False)
-    caption: Mapped[Optional[str]] = mapped_column(Text)
-    page_number: Mapped[Optional[int]] = mapped_column(Integer)
-    image_index: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    chunk: Mapped[Optional["SourceChunk"]] = relationship(back_populates="images")
-    source: Mapped["Source"] = relationship(back_populates="images")
+    from_slug: Mapped[str] = mapped_column(String(300), nullable=False)
+    to_slug: Mapped[str] = mapped_column(String(300), nullable=False)
 
     __table_args__ = (
-        Index("ix_chunk_images_chunk_id", "chunk_id"),
-        Index("ix_chunk_images_source_id", "source_id"),
+        PrimaryKeyConstraint("from_slug", "to_slug"),
+        Index("ix_wiki_links_from_slug", "from_slug"),
+        Index("ix_wiki_links_to_slug", "to_slug"),
     )
 
 
@@ -170,7 +154,6 @@ class Note(Base):
     title: Mapped[Optional[str]] = mapped_column(String(500))
     content: Mapped[Optional[str]] = mapped_column(Text)
     note_type: Mapped[Optional[str]] = mapped_column(String(50))  # "human", "ai"
-    embedding = mapped_column(Vector(768))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -505,4 +488,3 @@ class ProjectSource(Base):
     __table_args__ = (
         Index("ix_project_sources_source_id", "source_id"),
     )
-

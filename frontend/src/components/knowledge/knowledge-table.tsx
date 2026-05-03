@@ -105,10 +105,10 @@ export function KnowledgeTable({ sources, types, departments, loading, onRefresh
     setActionError(null);
     setReingestingIds((prev) => new Set(prev).add(id));
     try {
-      await api(`/api/sources/${id}/reingest`, { method: "POST" });
+      await api(`/api/sources/${id}/recompile`, { method: "POST" });
       onRefresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to re-ingest");
+      setActionError(err instanceof Error ? err.message : "Failed to recompile");
     } finally {
       setReingestingIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
     }

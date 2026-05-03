@@ -65,13 +65,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"MinIO not available yet: {e}")
 
-    # Connect Neo4j Knowledge Graph
-    try:
-        from app.services.neo4j_service import neo4j_service
-        await neo4j_service.connect()
-    except Exception as e:
-        logger.warning(f"Neo4j not available: {e}")
-
     # Seed default admin if no admin exists yet
     await seed_default_admin()
 
@@ -86,12 +79,6 @@ async def lifespan(app: FastAPI):
     logger.success("Arkon API started successfully")
     yield
 
-    # Shutdown Neo4j
-    try:
-        from app.services.neo4j_service import neo4j_service
-        await neo4j_service.close()
-    except Exception:
-        pass
     logger.info("Arkon API shutdown complete")
 
 
@@ -116,14 +103,13 @@ app.add_middleware(
 app.mount("/mcp", mcp_server.http_app(stateless_http=True))
 
 # --- REST API Routers ---
-from app.routers import sources, notes, contacts, search, auth, admin_settings, categories, rbac, knowledge_types, projects, roles  # noqa: E402
+from app.routers import sources, notes, contacts, auth, admin_settings, rbac, knowledge_types, projects, roles, wiki  # noqa: E402
 
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(sources.router, prefix="/api", tags=["sources"])
 app.include_router(notes.router, prefix="/api", tags=["notes"])
 app.include_router(contacts.router, prefix="/api", tags=["contacts"])
-app.include_router(categories.router, prefix="/api", tags=["categories"])
-app.include_router(search.router, prefix="/api", tags=["search"])
+app.include_router(wiki.router, prefix="/api", tags=["wiki"])
 app.include_router(admin_settings.router, prefix="/api", tags=["settings"])
 app.include_router(rbac.router, prefix="/api", tags=["rbac"])
 app.include_router(knowledge_types.router, prefix="/api", tags=["knowledge-types"])

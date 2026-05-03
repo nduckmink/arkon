@@ -52,9 +52,6 @@ dependencies = [
     "arq>=0.26",
     "redis[hiredis]>=5.0",
 
-    # Knowledge Graph
-    "neo4j>=5.20",
-
     # Security
     "cryptography>=44.0",
 ]
