@@ -408,7 +408,7 @@ def register_tools(mcp: FastMCP):
         return "\n\n".join(parts)
 
     # =========================================================================
-    # Source/Type/Contact browsing (kept as-is, unrelated to RAG pipeline)
+    # Source/Type browsing
     # =========================================================================
 
     @mcp.tool()
@@ -563,66 +563,3 @@ def register_tools(mcp: FastMCP):
             title = s.title or s.file_name or s.url or "Untitled"
             lines.append(f"- **{title}** (ID: `{s.id}`)")
         return "\n".join(lines)
-
-    @mcp.tool()
-    async def find_contacts(
-        topic: Optional[str] = None,
-        department: Optional[str] = None,
-        limit: int = 5,
-    ) -> str:
-        """
-        Find internal contacts matching a topic or department.
-
-        Args:
-            topic: Topic keyword (matched against contact topics & role).
-            department: Department name (substring match).
-            limit: Max contacts to return (default: 5).
-        """
-        from sqlalchemy import select
-        from app.database import async_session_factory
-        from app.database.models import Contact, Department
-
-        identity, err = await _get_identity()
-        if err:
-            return err
-
-        async with async_session_factory() as session:
-            stmt = select(Contact).limit(limit * 3)
-            if department:
-                stmt = (
-                    select(Contact)
-                    .join(Department, Contact.department_id == Department.id, isouter=True)
-                    .where(Department.name.ilike(f"%{department}%"))
-                    .limit(limit)
-                )
-            contacts = (await session.execute(stmt)).scalars().all()
-
-        if not contacts:
-            return "No contacts found in the directory."
-
-        if topic:
-            topic_lower = topic.lower()
-            scored = []
-            for c in contacts:
-                score = 0
-                if c.topics:
-                    score = sum(1 for t in c.topics if t.lower() in topic_lower or topic_lower in t.lower())
-                if c.role and topic_lower in c.role.lower():
-                    score += 1
-                scored.append((score, c))
-            scored.sort(key=lambda x: x[0], reverse=True)
-            contacts = [c for _, c in scored[:limit]]
-
-        lines = ["**Relevant Contacts**\n"]
-        for c in contacts:
-            parts = [f"- **{c.name}**"]
-            if c.role:
-                parts.append(f"  Role: {c.role}")
-            if c.phone:
-                parts.append(f"  Phone: {c.phone}")
-            if c.email:
-                parts.append(f"  Email: {c.email}")
-            if c.topics:
-                parts.append(f"  Topics: {', '.join(c.topics)}")
-            lines.append("\n".join(parts))
-        return "\n\n".join(lines)

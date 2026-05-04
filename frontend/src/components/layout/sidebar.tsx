@@ -10,14 +10,16 @@ type NavItem = {
   label: string;
   href: string;
   icon: string;
-  adminOnly?: boolean;
+  /** If set, user must have at least one of these permissions to see this item */
+  requiredPermissions?: string[];
 };
 
 type NavGroup = {
   id: string;
   label: string;
   icon: string;
-  adminOnly?: boolean;
+  /** If set, user must have at least one of these permissions to see this group */
+  requiredPermissions?: string[];
   items: NavItem[];
 };
 
@@ -27,38 +29,29 @@ const navGroups: NavGroup[] = [
     label: "Org Knowledge",
     icon: "corporate_fare",
     items: [
-      { label: "Documents", href: "/knowledge", icon: "description" },
-      { label: "Wiki", href: "/wiki", icon: "auto_stories" },
-    ],
-  },
-  {
-    id: "workspaces",
-    label: "Workspaces",
-    icon: "workspaces",
-    items: [
-      { label: "Workspaces", href: "/workspaces", icon: "folder_special" },
-      { label: "Contacts", href: "/contacts", icon: "contacts" },
+      { label: "Documents", href: "/knowledge", icon: "description", requiredPermissions: ["documents.read"] },
+      { label: "Wiki", href: "/wiki", icon: "auto_stories", requiredPermissions: ["kb.read"] },
     ],
   },
   {
     id: "organization",
     label: "Organization",
     icon: "account_tree",
-    adminOnly: true,
+    requiredPermissions: ["departments.read", "employees.read", "roles.read"],
     items: [
-      { label: "Departments", href: "/departments", icon: "domain" },
-      { label: "Employees", href: "/employees", icon: "group" },
-      { label: "Roles", href: "/roles", icon: "manage_accounts" },
+      { label: "Departments", href: "/departments", icon: "domain", requiredPermissions: ["departments.read"] },
+      { label: "Employees", href: "/employees", icon: "group", requiredPermissions: ["employees.read"] },
+      { label: "Roles", href: "/roles", icon: "manage_accounts", requiredPermissions: ["roles.read"] },
     ],
   },
   {
     id: "system",
     label: "System",
     icon: "tune",
-    adminOnly: true,
+    requiredPermissions: ["audit.read", "settings.read"],
     items: [
-      { label: "Audit Log", href: "/audit", icon: "policy" },
-      { label: "Settings", href: "/settings", icon: "settings" },
+      { label: "Audit Log", href: "/audit", icon: "policy", requiredPermissions: ["audit.read"] },
+      { label: "Settings", href: "/settings", icon: "settings", requiredPermissions: ["settings.read"] },
     ],
   },
 ];
@@ -83,14 +76,17 @@ function useCollapsed(groupId: string, defaultOpen: boolean) {
 
 function NavGroupSection({
   group,
-  isAdmin,
+  hasPermission,
   pathname,
 }: {
   group: NavGroup;
-  isAdmin: boolean;
+  hasPermission: (perm: string) => boolean;
   pathname: string;
 }) {
-  const visibleItems = group.items.filter((i) => !i.adminOnly || isAdmin);
+  const visibleItems = group.items.filter((i) => {
+    if (!i.requiredPermissions) return true;
+    return i.requiredPermissions.some((p) => hasPermission(p));
+  });
   if (visibleItems.length === 0) return null;
 
   const hasActive = visibleItems.some((i) =>
@@ -158,10 +154,12 @@ function NavGroupSection({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { user, hasPermission } = useAuth();
 
-  const visibleGroups = navGroups.filter((g) => !g.adminOnly || isAdmin);
+  const visibleGroups = navGroups.filter((g) => {
+    if (!g.requiredPermissions) return true;
+    return g.requiredPermissions.some((p) => hasPermission(p));
+  });
 
   return (
     <nav className="hidden md:flex fixed left-0 top-0 h-full w-60 border-r border-border bg-sidebar flex-col gap-1 p-4 z-40">
@@ -190,13 +188,31 @@ export function Sidebar() {
         Dashboard
       </Link>
 
+      {/* Workspaces — standalone */}
+      {hasPermission("workspaces.read") && (
+        <Link
+          href="/workspaces"
+          className={cn(
+            "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 mb-2",
+            pathname.startsWith("/workspaces")
+              ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold translate-x-0.5"
+              : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+          )}
+        >
+          <span className={cn("material-symbols-outlined text-lg", pathname.startsWith("/workspaces") && "filled")}>
+            folder_special
+          </span>
+          Workspaces
+        </Link>
+      )}
+
       {/* Grouped sections */}
       <div className="flex flex-col gap-1 flex-1 overflow-y-auto">
         {visibleGroups.map((group) => (
           <NavGroupSection
             key={group.id}
             group={group}
-            isAdmin={isAdmin}
+            hasPermission={hasPermission}
             pathname={pathname}
           />
         ))}

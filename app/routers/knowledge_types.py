@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.database.models import KnowledgeType, Employee
-from app.services.auth_service import require_admin
+from app.services.auth_service import require_permission
 
 router = APIRouter()
 
@@ -90,7 +90,7 @@ async def list_knowledge_types(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/knowledge-types", status_code=201, response_model=KnowledgeTypeOut)
-async def create_knowledge_type(body: KnowledgeTypeCreate, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
+async def create_knowledge_type(body: KnowledgeTypeCreate, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("documents.create")):
     """Create a new knowledge type."""
     # Generate slug from name if not provided
     slug = body.slug or re.sub(r"[^a-z0-9-]", "", body.name.lower().replace(" ", "-"))
@@ -132,7 +132,7 @@ async def update_knowledge_type(
     kt_id: str,
     body: KnowledgeTypeCreate,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("documents.edit"),
 ):
     """Update a knowledge type."""
     kt = await db.get(KnowledgeType, uuid.UUID(kt_id))
@@ -158,7 +158,7 @@ async def update_knowledge_type(
 
 
 @router.delete("/knowledge-types/{kt_id}")
-async def delete_knowledge_type(kt_id: str, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
+async def delete_knowledge_type(kt_id: str, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("documents.delete")):
     """Delete a knowledge type. Sources using it will have their type set to NULL."""
     kt = await db.get(KnowledgeType, uuid.UUID(kt_id))
     if not kt:
@@ -171,7 +171,7 @@ async def delete_knowledge_type(kt_id: str, db: AsyncSession = Depends(get_db), 
 async def reorder_knowledge_types(
     order: list[str],
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("documents.edit"),
 ):
     """
     Reorder knowledge types.

@@ -264,6 +264,9 @@ def build_tool_handlers(
     state: AgentState,
 ) -> dict[str, Callable]:
     """Return name→async_handler mapping with all context bound via closure."""
+    # Scope from source — workspace-scoped sources create scoped wiki pages
+    _scope_type = source.scope_type or "global"
+    _scope_id = source.scope_id
 
     async def _embed(text: str) -> Optional[list[float]]:
         if embedding_provider is None:
@@ -277,7 +280,9 @@ def build_tool_handlers(
     # --- read_wiki_index ---
 
     async def read_wiki_index() -> dict:
-        pages = await wiki_service.list_pages(session, limit=300)
+        pages = await wiki_service.list_pages(
+            session, limit=300, scope_type=_scope_type, scope_id=_scope_id,
+        )
         return {
             "count": len(pages),
             "pages": [
@@ -290,7 +295,9 @@ def build_tool_handlers(
 
     async def read_wiki_page(slug: str) -> dict:
         slug = slug.strip().lower()
-        page = await wiki_service.get_page_by_slug(session, slug)
+        page = await wiki_service.get_page_by_slug(
+            session, slug, scope_type=_scope_type, scope_id=_scope_id,
+        )
         if page is None:
             return {"error": f"Page not found: '{slug}'"}
         state.read_pages.add(slug)
@@ -313,7 +320,10 @@ def build_tool_handlers(
             query_emb = await embedding_provider.embed(query[:4000])
         except Exception as e:
             return {"error": f"Embedding failed: {e}"}
-        hits = await wiki_service.search_pages_semantic(session, query_emb, top_k=top_k)
+        hits = await wiki_service.search_pages_semantic(
+            session, query_emb, top_k=top_k,
+            scope_type=_scope_type, scope_id=_scope_id,
+        )
         return {
             "results": [
                 {
@@ -353,7 +363,9 @@ def build_tool_handlers(
         if not clean:
             return {"error": f"Invalid slug: '{slug}'. Use 'type/kebab-case-name' format."}
 
-        existing = await wiki_service.get_page_by_slug(session, clean)
+        existing = await wiki_service.get_page_by_slug(
+            session, clean, scope_type=_scope_type, scope_id=_scope_id,
+        )
         if existing is not None:
             return {"error": f"Slug '{clean}' already exists. Use update_page instead."}
 
@@ -372,6 +384,8 @@ def build_tool_handlers(
             knowledge_type_slugs=[kt_slug] if kt_slug else [],
             source_ids=[source.id],
             embedding=embedding,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         await session.flush()
         state.pages_created.append(clean)
@@ -387,7 +401,9 @@ def build_tool_handlers(
         title: Optional[str] = None,
     ) -> dict:
         clean = slug.strip().lower()
-        existing = await wiki_service.get_page_by_slug(session, clean)
+        existing = await wiki_service.get_page_by_slug(
+            session, clean, scope_type=_scope_type, scope_id=_scope_id,
+        )
         if existing is None:
             return {"error": f"Page '{clean}' not found. Use create_page to create it."}
 
@@ -404,6 +420,8 @@ def build_tool_handlers(
             add_knowledge_type_slug=kt_slug,
             add_source_id=source.id,
             embedding=embedding,
+            scope_type=_scope_type,
+            scope_id=_scope_id,
         )
         await session.flush()
         state.pages_updated.append(clean)
@@ -413,7 +431,9 @@ def build_tool_handlers(
     # --- append_log ---
 
     async def append_log(entry: str) -> dict:
-        await wiki_service.append_log(session, entry)
+        await wiki_service.append_log(
+            session, entry, scope_type=_scope_type, scope_id=_scope_id,
+        )
         return {"logged": entry[:120]}
 
     # --- finish ---

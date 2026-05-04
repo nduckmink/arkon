@@ -85,7 +85,7 @@ class ScopeCreate(BaseModel):
 @router.get("/departments")
 async def list_departments(
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("departments.read"),
 ):
     """List all departments with employee counts."""
     stmt = select(Department).options(selectinload(Department.employees))
@@ -107,7 +107,7 @@ async def list_departments(
 async def create_department(
     body: DepartmentCreate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("departments.manage"),
+    _user: Employee = require_permission("departments.create"),
 ):
     """Create a new department."""
     dept = Department(name=body.name, description=body.description)
@@ -121,7 +121,7 @@ async def update_department(
     dept_id: str,
     body: DepartmentCreate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("departments.manage"),
+    _user: Employee = require_permission("departments.edit"),
 ):
     dept = await db.get(Department, uuid.UUID(dept_id))
     if not dept:
@@ -136,7 +136,7 @@ async def update_department(
 async def delete_department(
     dept_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("departments.manage"),
+    _user: Employee = require_permission("departments.delete"),
 ):
     dept = await db.get(Department, uuid.UUID(dept_id))
     if not dept:
@@ -153,7 +153,7 @@ async def delete_department(
 async def list_employees(
     department_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("employees.read"),
 ):
     """List employees, optionally filtered by department."""
     stmt = (
@@ -188,7 +188,7 @@ async def list_employees(
 async def create_employee(
     body: EmployeeCreate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("employees.manage"),
+    _user: Employee = require_permission("employees.create"),
 ):
     """Create a new employee (admin only)."""
     dept = await db.get(Department, uuid.UUID(body.department_id))
@@ -241,7 +241,7 @@ async def update_employee(
     emp_id: str,
     body: EmployeeCreate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("employees.manage"),
+    _user: Employee = require_permission("employees.edit"),
 ):
     emp = await db.get(Employee, uuid.UUID(emp_id))
     if not emp:
@@ -261,7 +261,7 @@ async def update_employee(
 async def delete_employee(
     emp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("employees.manage"),
+    _user: Employee = require_permission("employees.delete"),
 ):
     emp = await db.get(Employee, uuid.UUID(emp_id))
     if not emp:
@@ -274,7 +274,7 @@ async def delete_employee(
 async def toggle_employee(
     emp_id: str,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("employees.manage"),
+    _user: Employee = require_permission("employees.edit"),
 ):
     """Activate or deactivate an employee."""
     emp = await db.get(Employee, uuid.UUID(emp_id))
@@ -293,7 +293,7 @@ async def toggle_employee(
 async def generate_mcp_token(
     emp_id: str,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("employees.edit"),
 ):
     """Generate (or regenerate) an MCP token for an employee."""
     emp = await db.get(Employee, uuid.UUID(emp_id))
@@ -318,7 +318,7 @@ async def generate_mcp_token(
 async def revoke_mcp_token(
     emp_id: str,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("employees.edit"),
 ):
     """Revoke an employee's MCP token."""
     auth_svc = MCPAuthService(db)
@@ -336,7 +336,7 @@ async def revoke_mcp_token(
 async def get_department_scopes(
     dept_id: str,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("scopes.read"),
 ):
     """Get knowledge scopes for a department."""
     stmt = select(KnowledgeScope).where(
@@ -361,7 +361,7 @@ async def get_department_scopes(
 async def get_employee_scopes(
     emp_id: str,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("scopes.read"),
 ):
     """Get personal knowledge scopes for an employee."""
     stmt = select(KnowledgeScope).where(
@@ -384,7 +384,7 @@ async def get_employee_scopes(
 async def create_scope(
     body: ScopeCreate,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("scopes.manage"),
 ):
     """Create a new knowledge scope."""
     scope = KnowledgeScope(
@@ -403,7 +403,7 @@ async def create_scope(
 async def delete_scope(
     scope_id: str,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("scopes.manage"),
 ):
     """Delete a knowledge scope."""
     scope = await db.get(KnowledgeScope, uuid.UUID(scope_id))

@@ -280,8 +280,16 @@ async def compile_source_into_wiki(
     Run the wiki compiler for one source. Persists changes via `session`
     (caller is responsible for the surrounding transaction/commit).
 
+    Scope is inherited from the source: if the source has scope_type='project'
+    and scope_id set, all created/updated wiki pages will be scoped to that
+    workspace. Global sources produce global wiki pages.
+
     Returns: {"pages_created": int, "pages_updated": int, "log_entry": str}
     """
+    # Resolve scope from source
+    src_scope_type = source.scope_type or "global"
+    src_scope_id = source.scope_id
+
     registry = ProviderRegistry(session)
 
     embedding_provider = await registry.get_embedding(task="document")
@@ -292,9 +300,11 @@ async def compile_source_into_wiki(
         truncated_text += "\n\n[…document truncated for compilation…]"
 
     # 1. Build context: index listing + top-K relevant pages by source embedding.
-    wiki_index_md = await _render_wiki_index(session)
+    #    Context is scoped — compiler only sees pages in the same scope.
+    wiki_index_md = await _render_wiki_index(session, scope_type=src_scope_type, scope_id=src_scope_id)
     relevant_md = await _render_relevant_pages(
-        session, embedding_provider, full_text, knowledge_type_slug
+        session, embedding_provider, full_text, knowledge_type_slug,
+        scope_type=src_scope_type, scope_id=src_scope_id,
     )
     kt_context = _format_kt_context(knowledge_type_name, knowledge_type_description)
 
@@ -307,9 +317,6 @@ async def compile_source_into_wiki(
     )
 
     # 2. Call LLM. Low temperature for structured output reliability.
-    # max_tokens needs to be generous — 30 substantive pages × ~400 words ≈ 25k+ tokens
-    # of JSON-escaped markdown output. 8k truncates output mid-page and forces
-    # the LLM to compress.
     try:
         raw = await llm.generate(prompt=prompt, temperature=0.2, max_tokens=32768)
     except Exception as e:
@@ -321,7 +328,7 @@ async def compile_source_into_wiki(
         logger.warning(f"Wiki compile produced no operations for source {source.id}")
         return {"pages_created": 0, "pages_updated": 0, "log_entry": ""}
 
-    # 3. Apply operations.
+    # 3. Apply operations — all within the source's scope.
     created = 0
     updated = 0
     log_entry = ""
@@ -334,9 +341,14 @@ async def compile_source_into_wiki(
                 slug = _validate_slug(op.get("slug"))
                 if not slug:
                     continue
-                if await wiki_service.get_page_by_slug(session, slug) is not None:
-                    # Slug collision — fall through to update path.
-                    await _apply_update(session, op, source, knowledge_type_slug)
+                if await wiki_service.get_page_by_slug(
+                    session, slug, scope_type=src_scope_type, scope_id=src_scope_id
+                ) is not None:
+                    # Slug collision in same scope — fall through to update.
+                    await _apply_update(
+                        session, op, source, knowledge_type_slug,
+                        scope_type=src_scope_type, scope_id=src_scope_id,
+                    )
                     updated += 1
                 else:
                     await wiki_service.apply_create(
@@ -348,6 +360,8 @@ async def compile_source_into_wiki(
                         summary=str(op.get("summary") or ""),
                         knowledge_type_slugs=[knowledge_type_slug] if knowledge_type_slug else [],
                         source_ids=[source.id],
+                        scope_type=src_scope_type,
+                        scope_id=src_scope_id,
                     )
                     created += 1
                 touched_slugs.append(slug)
@@ -356,7 +370,10 @@ async def compile_source_into_wiki(
                 slug = _validate_slug(op.get("slug"))
                 if not slug:
                     continue
-                applied = await _apply_update(session, op, source, knowledge_type_slug)
+                applied = await _apply_update(
+                    session, op, source, knowledge_type_slug,
+                    scope_type=src_scope_type, scope_id=src_scope_id,
+                )
                 if applied:
                     updated += 1
                     touched_slugs.append(slug)
@@ -373,11 +390,11 @@ async def compile_source_into_wiki(
 
     # 4. Re-embed touched pages (batch).
     if touched_slugs:
-        await _reembed_pages(session, embedding_provider, touched_slugs)
+        await _reembed_pages(session, embedding_provider, touched_slugs, scope_type=src_scope_type, scope_id=src_scope_id)
 
-    # 5. Regenerate the catalog and append a log line.
+    # 5. Regenerate the catalog and append a log line (scoped).
     if created or updated:
-        await wiki_service.regenerate_index(session)
+        await wiki_service.regenerate_index(session, scope_type=src_scope_type, scope_id=src_scope_id)
     final_log = log_entry or (
         f"ingested {source.title or source.file_name or source.id}: "
         f"+{created} pages, ~{updated} updated"
@@ -400,6 +417,8 @@ async def _apply_update(
     op: dict[str, Any],
     source: Source,
     knowledge_type_slug: Optional[str],
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> Optional[WikiPage]:
     """Translate a single 'update' op into a wiki_service.apply_update call."""
     slug = _validate_slug(op.get("slug"))
@@ -414,6 +433,8 @@ async def _apply_update(
         title=str(op["title"]) if op.get("title") is not None else None,
         add_knowledge_type_slug=knowledge_type_slug,
         add_source_id=source.id,
+        scope_type=scope_type,
+        scope_id=scope_id,
     )
 
 
@@ -442,11 +463,19 @@ def _format_kt_context(name: Optional[str], description: Optional[str]) -> str:
     return line
 
 
-async def _render_wiki_index(session: AsyncSession) -> str:
-    """Render existing pages as `slug — summary` lines, capped."""
+async def _render_wiki_index(
+    session: AsyncSession,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
+) -> str:
+    """Render existing pages as `slug — summary` lines, capped. Scoped."""
+    from app.services.wiki_service import _scope_filter
     stmt = (
         select(WikiPage.slug, WikiPage.page_type, WikiPage.summary)
-        .where(WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG]))
+        .where(
+            WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG]),
+            _scope_filter(scope_type, scope_id),
+        )
         .order_by(WikiPage.page_type, WikiPage.slug)
         .limit(MAX_INDEX_PAGES_LISTED)
     )
@@ -464,8 +493,10 @@ async def _render_relevant_pages(
     embedding_provider,
     full_text: str,
     knowledge_type_slug: Optional[str],
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> str:
-    """Embed the source's leading text and pick top-K most-relevant existing pages."""
+    """Embed the source's leading text and pick top-K most-relevant existing pages. Scoped."""
     sample = full_text[:6000]
     if not sample.strip():
         return ""
@@ -478,6 +509,7 @@ async def _render_relevant_pages(
     allowed = [knowledge_type_slug] if knowledge_type_slug else None
     hits = await wiki_service.search_pages_semantic(
         session, query_emb, top_k=TOP_K_RELEVANT, allowed_kt_slugs=allowed,
+        scope_type=scope_type, scope_id=scope_id,
     )
     if not hits:
         return ""
@@ -532,13 +564,19 @@ async def _reembed_pages(
     session: AsyncSession,
     embedding_provider,
     slugs: list[str],
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> None:
-    """Re-embed all pages in `slugs` in one batch and persist."""
+    """Re-embed all pages in `slugs` within the given scope in one batch."""
+    from app.services.wiki_service import _scope_filter
     unique = list(dict.fromkeys(slugs))
     if not unique:
         return
     rows = (await session.execute(
-        select(WikiPage).where(WikiPage.slug.in_(unique))
+        select(WikiPage).where(
+            WikiPage.slug.in_(unique),
+            _scope_filter(scope_type, scope_id),
+        )
     )).scalars().all()
     if not rows:
         return

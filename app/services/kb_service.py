@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.registry import ProviderRegistry
 from app.ai.wiki_compiler import compile_source_into_wiki
-from app.database.models import Contact, KnowledgeType, Source
+from app.database.models import KnowledgeType, Source
 from app.services.image_service import ImageInfo, extract_images
 from app.services.source_outline import assemble_full_text, build_outline
 from app.services.storage_service import storage_service
@@ -136,36 +136,6 @@ async def ingest_source(
         source.error_message = str(e)[:500]
         await session.flush()
         raise
-
-
-# ---------------------------------------------------------------------------
-# Contact suggestion (used by chat flows)
-# ---------------------------------------------------------------------------
-
-async def suggest_contacts(
-    session: AsyncSession,
-    query: str,
-    limit: int = 3,
-) -> list[dict]:
-    """Find relevant contacts whose topics overlap the query keywords."""
-    stmt = select(Contact).where(Contact.topics.isnot(None))
-    result = await session.execute(stmt)
-    contacts = result.scalars().all()
-
-    query_lower = query.lower()
-    scored = []
-    for c in contacts:
-        if not c.topics:
-            continue
-        score = sum(1 for t in c.topics if t.lower() in query_lower or query_lower in t.lower())
-        if score > 0:
-            scored.append((score, c))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [
-        {"name": c.name, "role": c.role, "phone": c.phone, "email": c.email}
-        for _, c in scored[:limit]
-    ]
 
 
 # ---------------------------------------------------------------------------

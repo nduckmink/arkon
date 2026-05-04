@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { McpTokenCard } from "@/components/profile/mcp-token-card";
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -46,7 +46,16 @@ export default function ProfilePage() {
 
   return (
     <>
-      <PageHeader title="Profile" description="Manage your account settings." />
+      <PageHeader 
+        title="Profile" 
+        description="Manage your account settings."
+        action={
+          <Button variant="destructive" onClick={logout}>
+            <span className="material-symbols-outlined text-base mr-1">logout</span>
+            Logout
+          </Button>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Profile Info */}

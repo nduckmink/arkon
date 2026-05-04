@@ -317,7 +317,11 @@ async def compile_source_with_agent(
     # Regenerate index after all pages are written
     total = len(state.pages_created) + len(state.pages_updated)
     if total:
-        await wiki_service.regenerate_index(session)
+        _scope_type = source.scope_type or "global"
+        _scope_id = source.scope_id
+        await wiki_service.regenerate_index(
+            session, scope_type=_scope_type, scope_id=_scope_id,
+        )
 
     summary = state.summary()
     logger.info(

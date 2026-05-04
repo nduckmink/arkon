@@ -60,12 +60,12 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: Props) {
       if (project) {
         await api(`/api/projects/${project.id}`, {
           method: "PUT",
-          body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, status, workspace_type: workspaceType }),
+          body: { name: name.trim(), description: description.trim() || undefined, status, workspace_type: workspaceType },
         });
       } else {
         await api("/api/projects", {
           method: "POST",
-          body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, workspace_type: workspaceType }),
+          body: { name: name.trim(), description: description.trim() || undefined, workspace_type: workspaceType },
         });
       }
       onSaved();
@@ -103,19 +103,31 @@ export function ProjectDialog({ open, onOpenChange, project, onSaved }: Props) {
               <Label>Type</Label>
               <Select value={workspaceType} onValueChange={(v) => { if (v) setWorkspaceType(v); }}>
                 <SelectTrigger className="w-full bg-background">
-                  <SelectValue />
+                  {workspaceType === "project" ? (
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-sm">folder_special</span>
+                      Project
+                    </div>
+                  ) : workspaceType === "customer" ? (
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-sm">domain</span>
+                      Customer
+                    </div>
+                  ) : (
+                    <SelectValue placeholder="Select type" />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="project">
                     <div className="flex items-center gap-2">
                       <span className="material-symbols-outlined text-sm">folder_special</span>
-                      Project (Internal)
+                      Project
                     </div>
                   </SelectItem>
                   <SelectItem value="customer">
                     <div className="flex items-center gap-2">
                       <span className="material-symbols-outlined text-sm">domain</span>
-                      Customer (External)
+                      Customer
                     </div>
                   </SelectItem>
                 </SelectContent>

@@ -6,6 +6,9 @@ Each page is markdown that may contain `[[slug]]` wikilinks; after every
 upsert, refresh_links() re-parses the content and rewrites the wiki_links
 edge table so 1-2 hop graph queries (backlinks, neighborhood) stay fast in
 PostgreSQL — no separate graph DB needed.
+
+Scope support: every page belongs to a scope (global or workspace). Query
+functions accept scope_type/scope_id to isolate results. Default is global.
 """
 
 import re
@@ -29,7 +32,18 @@ LOG_SLUG = "_log"
 PAGE_TYPES = {"entity", "concept", "source", "topic", "index", "log"}
 
 # `[[slug]]` or `[[slug|display text]]` — captures the slug only.
-_WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|[^\]]*)?\]\]")
+_WIKILINK_RE = re.compile(r"\[\[([^\]\|]+)(?:\|[^\]]*)?]]")
+
+
+# ---------------------------------------------------------------------------
+# Scope filter helper
+# ---------------------------------------------------------------------------
+
+def _scope_filter(scope_type: str = "global", scope_id: Optional[uuid.UUID] = None):
+    """Return SQLAlchemy WHERE clauses for scope filtering."""
+    if scope_id:
+        return and_(WikiPage.scope_type == scope_type, WikiPage.scope_id == scope_id)
+    return and_(WikiPage.scope_type == scope_type, WikiPage.scope_id.is_(None))
 
 
 # ---------------------------------------------------------------------------
@@ -145,14 +159,18 @@ async def get_page_by_slug(
     session: AsyncSession,
     slug: str,
     allowed_kt_slugs: Optional[list[str]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> Optional[WikiPage]:
     """
-    Fetch a page by slug. If `allowed_kt_slugs` is given (RBAC), only return
-    the page when it overlaps the allowed set or is a reserved slug (index/log
-    are always readable since they don't expose privileged content directly —
-    the compiler controls what lands there).
+    Fetch a page by slug within a specific scope. If `allowed_kt_slugs` is
+    given (RBAC), only return the page when it overlaps the allowed set or is
+    a reserved slug.
     """
-    stmt = select(WikiPage).where(WikiPage.slug == slug)
+    stmt = select(WikiPage).where(
+        WikiPage.slug == slug,
+        _scope_filter(scope_type, scope_id),
+    )
     result = await session.execute(stmt)
     page = result.scalar_one_or_none()
     if page is None:
@@ -160,8 +178,6 @@ async def get_page_by_slug(
     if allowed_kt_slugs is None or slug in (INDEX_SLUG, LOG_SLUG):
         return page
     if not page.knowledge_type_slugs:
-        # Pages without any KT slug are visible to everyone (e.g. compiler-created
-        # without source context). Adjust if stricter default is desired.
         return page
     if any(s in allowed_kt_slugs for s in page.knowledge_type_slugs):
         return page
@@ -175,11 +191,16 @@ async def list_pages(
     allowed_kt_slugs: Optional[list[str]] = None,
     limit: int = 50,
     offset: int = 0,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> list[WikiPage]:
-    """List pages with filtering. Reserved slugs are excluded."""
+    """List pages with filtering within a specific scope. Reserved slugs excluded."""
     stmt = (
         select(WikiPage)
-        .where(WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG]))
+        .where(
+            WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG]),
+            _scope_filter(scope_type, scope_id),
+        )
         .order_by(WikiPage.updated_at.desc())
         .limit(limit)
         .offset(offset)
@@ -189,7 +210,6 @@ async def list_pages(
     if knowledge_type_slug:
         stmt = stmt.where(WikiPage.knowledge_type_slugs.any(knowledge_type_slug))
     if allowed_kt_slugs:
-        # ARRAY overlap operator: rows where knowledge_type_slugs && ARRAY[allowed]
         stmt = stmt.where(
             or_(
                 WikiPage.knowledge_type_slugs.overlap(allowed_kt_slugs),
@@ -205,10 +225,12 @@ async def search_pages_semantic(
     query_embedding: list[float],
     top_k: int = 10,
     allowed_kt_slugs: Optional[list[str]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> list[tuple[WikiPage, float]]:
     """
-    Cosine-similarity search over wiki page embeddings. Returns (page, similarity)
-    pairs sorted by similarity descending. Reserved slugs are excluded.
+    Cosine-similarity search over wiki page embeddings within a scope.
+    Returns (page, similarity) pairs sorted by similarity descending.
     """
     stmt = (
         select(
@@ -219,6 +241,7 @@ async def search_pages_semantic(
             and_(
                 WikiPage.embedding.is_not(None),
                 WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG]),
+                _scope_filter(scope_type, scope_id),
             )
         )
         .order_by(WikiPage.embedding.cosine_distance(query_embedding))
@@ -249,8 +272,10 @@ async def apply_create(
     knowledge_type_slugs: list[str],
     source_ids: list[uuid.UUID],
     embedding: Optional[list[float]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> WikiPage:
-    """Insert a new page. Conflicts (slug exists) raise — caller should use update."""
+    """Insert a new page in the given scope. Conflicts raise — caller should use update."""
     page = WikiPage(
         slug=slug,
         title=title,
@@ -260,6 +285,8 @@ async def apply_create(
         knowledge_type_slugs=list(knowledge_type_slugs or []),
         source_ids=list(source_ids or []),
         embedding=embedding,
+        scope_type=scope_type,
+        scope_id=scope_id,
         version=1,
     )
     session.add(page)
@@ -277,9 +304,11 @@ async def apply_update(
     add_knowledge_type_slug: Optional[str] = None,
     add_source_id: Optional[uuid.UUID] = None,
     embedding: Optional[list[float]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> Optional[WikiPage]:
     """
-    Update an existing page atomically:
+    Update an existing page atomically within the given scope:
       - Replace content_md with new_content_md.
       - Optionally update title/summary.
       - Union add_knowledge_type_slug into knowledge_type_slugs.
@@ -287,7 +316,7 @@ async def apply_update(
       - Bump version, refresh updated_at, refresh embedding if supplied.
     Returns None if the page does not exist.
     """
-    page = await get_page_by_slug(session, slug)
+    page = await get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
     if page is None:
         return None
 
@@ -318,13 +347,16 @@ async def upsert_page(
     knowledge_type_slugs: list[str],
     source_ids: list[uuid.UUID],
     embedding: Optional[list[float]] = None,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
 ) -> WikiPage:
-    """Create-or-update by slug. Used when the compiler isn't sure which case applies."""
-    existing = await get_page_by_slug(session, slug)
+    """Create-or-update by slug within a scope."""
+    existing = await get_page_by_slug(session, slug, scope_type=scope_type, scope_id=scope_id)
     if existing is None:
         return await apply_create(
             session, slug, title, page_type, content_md, summary,
             knowledge_type_slugs, source_ids, embedding,
+            scope_type=scope_type, scope_id=scope_id,
         )
     return await apply_update(
         session,
@@ -335,6 +367,7 @@ async def upsert_page(
         add_knowledge_type_slug=knowledge_type_slugs[0] if knowledge_type_slugs else None,
         add_source_id=source_ids[0] if source_ids else None,
         embedding=embedding,
+        scope_type=scope_type, scope_id=scope_id,
     ) or existing
 
 
@@ -342,14 +375,21 @@ async def upsert_page(
 # Reserved pages: _index and _log
 # ---------------------------------------------------------------------------
 
-async def regenerate_index(session: AsyncSession) -> WikiPage:
+async def regenerate_index(
+    session: AsyncSession,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
+) -> WikiPage:
     """
-    Rebuild the `_index` page from the current set of wiki pages.
+    Rebuild the `_index` page within the given scope.
     Grouped by page_type, alphabetical within group. Excludes reserved slugs.
     """
     stmt = (
         select(WikiPage.slug, WikiPage.title, WikiPage.page_type, WikiPage.summary)
-        .where(WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG]))
+        .where(
+            WikiPage.slug.notin_([INDEX_SLUG, LOG_SLUG]),
+            _scope_filter(scope_type, scope_id),
+        )
         .order_by(WikiPage.page_type, WikiPage.title)
     )
     rows = (await session.execute(stmt)).all()
@@ -371,7 +411,7 @@ async def regenerate_index(session: AsyncSession) -> WikiPage:
             lines.append("")
 
     new_md = "\n".join(lines).rstrip() + "\n"
-    page = await get_page_by_slug(session, INDEX_SLUG)
+    page = await get_page_by_slug(session, INDEX_SLUG, scope_type=scope_type, scope_id=scope_id)
     if page is None:
         page = WikiPage(
             slug=INDEX_SLUG,
@@ -381,6 +421,8 @@ async def regenerate_index(session: AsyncSession) -> WikiPage:
             summary="Catalog of all wiki pages",
             knowledge_type_slugs=[],
             source_ids=[],
+            scope_type=scope_type,
+            scope_id=scope_id,
         )
         session.add(page)
     else:
@@ -390,14 +432,18 @@ async def regenerate_index(session: AsyncSession) -> WikiPage:
     return page
 
 
-async def append_log(session: AsyncSession, entry: str) -> WikiPage:
+async def append_log(
+    session: AsyncSession,
+    entry: str,
+    scope_type: str = "global",
+    scope_id: Optional[uuid.UUID] = None,
+) -> WikiPage:
     """
-    Append a timestamped line to the `_log` page. Prefix format keeps it
-    grep-friendly: `## [YYYY-MM-DD HH:MM] entry text`.
+    Append a timestamped line to the `_log` page within the given scope.
     """
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
     line = f"## [{ts}] {entry.strip()}"
-    page = await get_page_by_slug(session, LOG_SLUG)
+    page = await get_page_by_slug(session, LOG_SLUG, scope_type=scope_type, scope_id=scope_id)
     if page is None:
         page = WikiPage(
             slug=LOG_SLUG,
@@ -407,6 +453,8 @@ async def append_log(session: AsyncSession, entry: str) -> WikiPage:
             summary="Chronological activity log",
             knowledge_type_slugs=[],
             source_ids=[],
+            scope_type=scope_type,
+            scope_id=scope_id,
         )
         session.add(page)
     else:
@@ -456,7 +504,7 @@ async def delete_page_cascade(
         cleaned = ref_page.content_md or ""
         # Replace [[slug|display]] with just display text
         cleaned = re.sub(
-            rf"\[\[{re.escape(slug)}\|([^\]]+)\]\]",
+            rf"\[\[{re.escape(slug)}\|([^\]]+)]]",
             r"\1",
             cleaned,
         )

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.database.models import Employee, WikiPage
 from app.services import wiki_service
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, require_permission
 
 router = APIRouter()
 
@@ -61,7 +61,7 @@ async def list_wiki_pages(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = Depends(get_current_user),
+    _user: Employee = require_permission("kb.read"),
 ):
     pages = await wiki_service.list_pages(
         db,
@@ -76,10 +76,14 @@ async def list_wiki_pages(
 @router.get("/wiki/pages/{slug:path}", response_model=WikiPageDetail)
 async def get_wiki_page(
     slug: str,
+    scope_type: Optional[str] = Query(None),
+    scope_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = Depends(get_current_user),
+    _user: Employee = require_permission("kb.read"),
 ):
-    page = await wiki_service.get_page_by_slug(db, slug)
+    sid = uuid.UUID(scope_id) if scope_id else None
+    st = scope_type or "global"
+    page = await wiki_service.get_page_by_slug(db, slug, scope_type=st, scope_id=sid)
     if not page:
         raise HTTPException(404, f"Wiki page not found: {slug}")
     backlinks = await wiki_service.get_backlinks(db, slug)
@@ -96,7 +100,7 @@ async def get_wiki_page(
 @router.get("/wiki/index")
 async def get_wiki_index(
     db: AsyncSession = Depends(get_db),
-    _user: Employee = Depends(get_current_user),
+    _user: Employee = require_permission("kb.read"),
 ):
     page = await wiki_service.get_page_by_slug(db, wiki_service.INDEX_SLUG)
     return {"content_md": page.content_md if page else ""}
@@ -105,7 +109,7 @@ async def get_wiki_index(
 @router.get("/wiki/log")
 async def get_wiki_log(
     db: AsyncSession = Depends(get_db),
-    _user: Employee = Depends(get_current_user),
+    _user: Employee = require_permission("kb.read"),
 ):
     page = await wiki_service.get_page_by_slug(db, wiki_service.LOG_SLUG)
     return {"content_md": page.content_md if page else ""}
@@ -115,7 +119,7 @@ async def get_wiki_log(
 async def delete_wiki_page(
     slug: str,
     db: AsyncSession = Depends(get_db),
-    user: Employee = Depends(get_current_user),
+    user: Employee = require_permission("kb.delete"),
 ):
     """Delete a wiki page and cascade-cleanup all references."""
     if slug in (wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG):
@@ -125,7 +129,7 @@ async def delete_wiki_page(
     if not page:
         raise HTTPException(404, f"Wiki page not found: {slug}")
 
-    # Check admin role
+    # Check admin role (additional safeguard)
     if user.role not in ("admin", "super_admin"):
         raise HTTPException(403, "Only admins can delete wiki pages")
 
@@ -142,7 +146,7 @@ async def get_wiki_graph(
     slug: Optional[str] = Query(None, description="Center the graph on this slug; omit for full graph"),
     depth: int = Query(1, ge=1, le=3),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = Depends(get_current_user),
+    _user: Employee = require_permission("kb.read"),
 ):
     """Return nodes/edges for visualization. Without `slug`, returns the full graph."""
     if slug:

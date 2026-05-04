@@ -21,8 +21,26 @@ from app.services.auth_service import (
     hash_password,
     verify_password,
 )
+from app.services.permissions import ALL_PERMISSIONS
 
 router = APIRouter()
+
+
+def _get_effective_permissions(employee: Employee) -> list[str]:
+    """Return the effective permission list for an employee, auto-migrating legacy names."""
+    if employee.role == "admin":
+        return sorted(ALL_PERMISSIONS)
+    if not employee.custom_role:
+        return []
+    stored = employee.custom_role.permissions or []
+    from app.routers.roles import _LEGACY_MAP
+    effective: set[str] = set()
+    for p in stored:
+        if p in _LEGACY_MAP:
+            effective.update(_LEGACY_MAP[p])
+        else:
+            effective.add(p)
+    return sorted(p for p in effective if p in ALL_PERMISSIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +72,7 @@ class ProfileResponse(BaseModel):
     department_name: str
     is_active: bool
     has_mcp_token: bool
+    permissions: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +104,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             "role": employee.role,
             "department_id": str(employee.department_id),
             "department_name": employee.department.name if employee.department else "",
+            "permissions": _get_effective_permissions(employee),
         },
     )
 
@@ -101,6 +121,7 @@ async def get_profile(current_user: Employee = Depends(get_current_user)):
         department_name=current_user.department.name if current_user.department else "",
         is_active=current_user.is_active,
         has_mcp_token=bool(current_user.mcp_token),
+        permissions=_get_effective_permissions(current_user),
     )
 
 

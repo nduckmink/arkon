@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { WikiGraphData, WikiPageDetail } from "@/types/wiki";
 import { WikiGraph } from "@/components/wiki/wiki-graph";
@@ -14,6 +14,9 @@ const PAGE_TYPES = ["entity", "concept", "topic", "source"];
 
 export default function WikiGraphPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
+  const isScoped = !!projectId;
   const [graphData, setGraphData] = React.useState<WikiGraphData | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [activeTypes, setActiveTypes] = React.useState<Set<string>>(new Set(PAGE_TYPES));
@@ -26,11 +29,14 @@ export default function WikiGraphPage() {
   const [previewLoading, setPreviewLoading] = React.useState(false);
 
   React.useEffect(() => {
-    api<WikiGraphData>("/api/wiki/graph")
+    const url = projectId
+      ? `/api/projects/${projectId}/wiki/graph`
+      : "/api/wiki/graph";
+    api<WikiGraphData>(url)
       .then((d) => setGraphData(d))
       .catch(() => setGraphData(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [projectId]);
 
   // Fetch preview data when a node is clicked
   React.useEffect(() => {
@@ -81,15 +87,17 @@ export default function WikiGraphPage() {
       <div className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-card/80 backdrop-blur-sm shrink-0">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push("/wiki")}
+            onClick={() => router.push(isScoped ? `/workspaces` : "/wiki")}
             className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-accent/50"
-            title="Back to Wiki"
+            title={isScoped ? "Back to Workspace" : "Back to Wiki"}
           >
             <span className="material-symbols-outlined text-base">arrow_back</span>
           </button>
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-base text-muted-foreground">hub</span>
-            <span className="text-sm font-semibold text-foreground">Knowledge Graph</span>
+            <span className="text-sm font-semibold text-foreground">
+              {isScoped ? "Workspace Graph" : "Knowledge Graph"}
+            </span>
           </div>
           {graphData && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground ml-1">

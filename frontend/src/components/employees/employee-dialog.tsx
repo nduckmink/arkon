@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dialog";
 
 type Department = { id: string; name: string };
-type Role = { id: string; name: string };
+type Role = { id: string; name: string; is_system?: boolean };
 type Employee = {
   id: string;
   name: string;
@@ -56,6 +56,75 @@ export function EmployeeDialog({
   const [customRoleId, setCustomRoleId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [localRoles, setLocalRoles] = useState<Role[]>([]);
+  const [localDepartments, setLocalDepartments] = useState<Department[]>([]);
+  const [inlinePrompt, setInlinePrompt] = useState({
+    open: false,
+    title: "",
+    label: "",
+    value: "",
+    saving: false,
+    error: "",
+    onSubmit: async (val: string) => {},
+  });
+
+  useEffect(() => {
+    setLocalRoles(roles.filter(r => !r.is_system));
+  }, [roles]);
+
+  useEffect(() => {
+    setLocalDepartments(departments);
+  }, [departments]);
+
+  const handleCreateDepartment = () => {
+    setInlinePrompt({
+      open: true,
+      title: "Create Department",
+      label: "Department Name",
+      value: "",
+      saving: false,
+      error: "",
+      onSubmit: async (val) => {
+        const newDept = await api<Department>("/api/departments", {
+          method: "POST",
+          body: { name: val, description: "" }
+        });
+        setLocalDepartments(prev => [...prev, newDept]);
+        setDeptId(newDept.id);
+        setInlinePrompt(p => ({ ...p, open: false }));
+      }
+    });
+  };
+
+  const handleCreateRole = () => {
+    setInlinePrompt({
+      open: true,
+      title: "Create Position",
+      label: "Position Name",
+      value: "",
+      saving: false,
+      error: "",
+      onSubmit: async (val) => {
+        const newRole = await api<Role>("/api/roles", {
+          method: "POST",
+          body: { name: val, permissions: [] }
+        });
+        setLocalRoles(prev => [...prev, newRole]);
+        setCustomRoleId(newRole.id);
+        setInlinePrompt(p => ({ ...p, open: false }));
+      }
+    });
+  };
+
+  const submitInlinePrompt = async () => {
+    if (!inlinePrompt.value.trim()) return;
+    setInlinePrompt(p => ({ ...p, saving: true, error: "" }));
+    try {
+      await inlinePrompt.onSubmit(inlinePrompt.value.trim());
+    } catch (err) {
+      setInlinePrompt(p => ({ ...p, saving: false, error: err instanceof Error ? err.message : String(err) }));
+    }
+  };
 
   useEffect(() => {
     if (employee) {
@@ -112,7 +181,8 @@ export function EmployeeDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl">
@@ -160,10 +230,10 @@ export function EmployeeDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-2">
-              <Label>Role</Label>
+              <Label>System Role</Label>
               <Select value={role} onValueChange={(v) => v && setRole(v)}>
                 <SelectTrigger className="bg-background">
-                  <SelectValue />
+                  {role === "admin" ? "Admin" : role === "employee" ? "Employee" : <SelectValue />}
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="employee">Employee</SelectItem>
@@ -174,38 +244,67 @@ export function EmployeeDialog({
 
             <div className="flex flex-col gap-2">
               <Label>Department</Label>
-              <Select value={deptId} onValueChange={(v) => v && setDeptId(v)}>
+              <Select 
+                value={deptId} 
+                onValueChange={(v) => {
+                  if (v === "__new__") {
+                    handleCreateDepartment();
+                    return;
+                  }
+                  if (v) setDeptId(v);
+                }}
+              >
                 <SelectTrigger className="bg-background">
-                  <SelectValue placeholder="Select" />
+                  {deptId ? (localDepartments.find(d => d.id === deptId)?.name || deptId) : <SelectValue placeholder="Select" />}
                 </SelectTrigger>
-                <SelectContent>
-                  {departments.map((d) => (
+                <SelectContent className="!w-max min-w-(--anchor-width)">
+                  {localDepartments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
                     </SelectItem>
                   ))}
+                  <div className="h-px bg-border my-1 -mx-1" />
+                  <SelectItem value="__new__" className="text-primary font-medium focus:text-primary">
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-sm">add</span>
+                      Create new department...
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {roles.length > 0 && (
+          {role === "employee" && (
             <div className="flex flex-col gap-2">
-              <Label>Custom Role</Label>
+              <Label>Position</Label>
               <Select
                 value={customRoleId || "__none__"}
-                onValueChange={(v) => setCustomRoleId(v === "__none__" ? "" : (v ?? ""))}
+                onValueChange={(v) => {
+                  if (v === "__new__") {
+                    handleCreateRole();
+                    return;
+                  }
+                  setCustomRoleId(v === "__none__" ? "" : (v ?? ""));
+                }}
               >
                 <SelectTrigger className="bg-background">
-                  <SelectValue placeholder="None" />
+                  {customRoleId ? (localRoles.find(r => r.id === customRoleId)?.name || customRoleId) : "None"}
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="!w-max min-w-(--anchor-width)">
                   <SelectItem value="__none__">None</SelectItem>
-                  {roles.map((r) => (
+                  {localRoles.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}
                     </SelectItem>
                   ))}
+                  <div className="h-px bg-border my-1 -mx-1" />
+                  <SelectItem value="__new__" className="text-primary font-medium focus:text-primary">
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-sm">add</span>
+                      Create new position...
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -236,5 +335,44 @@ export function EmployeeDialog({
         </form>
       </DialogContent>
     </Dialog>
+
+      <Dialog open={inlinePrompt.open} onOpenChange={(o) => setInlinePrompt(p => ({ ...p, open: o }))}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{inlinePrompt.title}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-2">
+              <Label>{inlinePrompt.label}</Label>
+              <Input 
+                value={inlinePrompt.value}
+                onChange={e => setInlinePrompt(p => ({ ...p, value: e.target.value }))}
+                autoFocus
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitInlinePrompt();
+                  }
+                }}
+              />
+            </div>
+            {inlinePrompt.error && (
+              <p className="text-destructive text-sm">{inlinePrompt.error}</p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button type="button" variant="outline" onClick={() => setInlinePrompt(p => ({ ...p, open: false }))}>
+              Cancel
+            </Button>
+            <Button 
+              disabled={inlinePrompt.saving || !inlinePrompt.value.trim()} 
+              onClick={submitInlinePrompt}
+            >
+              {inlinePrompt.saving ? "Saving..." : "Create"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

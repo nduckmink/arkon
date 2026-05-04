@@ -56,7 +56,13 @@ function extractHeadings(md: string): { id: string; text: string; level: number 
   return headings;
 }
 
-export function WikiContent({ markdown }: { markdown: string }) {
+export function WikiContent({
+  markdown,
+  onWikiLinkClick,
+}: {
+  markdown: string;
+  onWikiLinkClick?: (slug: string) => void;
+}) {
   const processed = preprocessWikilinks(markdown);
   const headings = React.useMemo(() => extractHeadings(markdown), [markdown]);
   const [activeHeading, setActiveHeading] = React.useState<string | null>(null);
@@ -172,6 +178,17 @@ export function WikiContent({ markdown }: { markdown: string }) {
             ),
             a: ({ href, children }) => {
               if (href?.startsWith("/wiki/")) {
+                const slug = href.slice("/wiki/".length);
+                if (onWikiLinkClick) {
+                  return (
+                    <button
+                      onClick={() => onWikiLinkClick(slug)}
+                      className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"
+                    >
+                      {children}
+                    </button>
+                  );
+                }
                 return (
                   <Link
                     href={href}

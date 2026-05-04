@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { WikiPageDetail } from "@/types/wiki";
 import { WikiPageTree } from "@/components/wiki/wiki-page-tree";
@@ -16,8 +16,12 @@ import Link from "next/link";
 
 export default function WikiPageViewer() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const slugParts = Array.isArray(params.slug) ? params.slug : [params.slug ?? ""];
   const fullSlug = slugParts.join("/");
+  const scopeType = searchParams.get("scopeType") || undefined;
+  const scopeId = searchParams.get("scopeId") || undefined;
+  const isScoped = !!scopeType && scopeType !== "global";
 
   const [page, setPage] = React.useState<WikiPageDetail | null>(null);
   const [notFound, setNotFound] = React.useState(false);
@@ -30,7 +34,10 @@ export default function WikiPageViewer() {
     setNotFound(false);
     setPage(null);
 
-    api<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(fullSlug)}`)
+    const scopeParams = isScoped
+      ? `?scope_type=${scopeType}&scope_id=${scopeId}`
+      : "";
+    api<WikiPageDetail>(`/api/wiki/pages/${encodeURIComponent(fullSlug)}${scopeParams}`)
       .then((data) => setPage(data))
       .catch((err) => {
         if (err?.status === 404 || err?.message?.includes("404")) {
@@ -38,7 +45,7 @@ export default function WikiPageViewer() {
         }
       })
       .finally(() => setLoading(false));
-  }, [fullSlug]);
+  }, [fullSlug, scopeType, scopeId, isScoped]);
 
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -84,7 +91,11 @@ export default function WikiPageViewer() {
         className="flex-1 flex gap-0 -mx-6 md:-mx-8 lg:-mx-10 -mb-6 md:-mb-8 lg:-mb-10 min-h-0 border-t border-border overflow-hidden"
       >
         {/* Left: Page Tree */}
-        <WikiPageTree activeSlug={fullSlug} />
+        <WikiPageTree
+          activeSlug={fullSlug}
+          pagesUrl={isScoped ? `/api/projects/${scopeId}/wiki?limit=200` : undefined}
+          linkQueryParams={isScoped ? `?scopeType=${scopeType}&scopeId=${scopeId}` : undefined}
+        />
 
         {/* Center: Content */}
         <div className="flex-1 overflow-y-auto min-w-0">
@@ -122,19 +133,19 @@ export default function WikiPageViewer() {
               {/* Breadcrumb & Back Button */}
               <div className="flex items-center gap-3 mb-6">
                 <Link
-                  href="/wiki"
+                  href={isScoped ? `/workspaces` : "/wiki"}
                   className="flex items-center justify-center w-8 h-8 rounded-full border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0 shadow-sm"
-                  title="Back to Wiki Index"
+                  title={isScoped ? "Back to Workspace" : "Back to Wiki Index"}
                 >
                   <span className="material-symbols-outlined text-[18px]">arrow_back</span>
                 </Link>
 
                 <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Link
-                    href="/wiki"
+                    href={isScoped ? `/workspaces` : "/wiki"}
                     className="hover:text-foreground transition-colors font-medium"
                   >
-                    Wiki
+                    {isScoped ? "Workspace" : "Wiki"}
                   </Link>
                   <span className="material-symbols-outlined text-muted-foreground/50" style={{ fontSize: 14 }}>chevron_right</span>
                   <span className="capitalize font-medium">

@@ -78,10 +78,10 @@ export function ScopeMembersDialog({ open, onOpenChange, label, scopeType, scope
     try {
       await api(`/api/scopes/${scopeType}/${scopeId}/members`, {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           employee_id: selectedEmpId,
           role: selectedRole,
-        }),
+        },
       });
       setSelectedEmpId("");
       await loadMembers();
@@ -138,7 +138,16 @@ export function ScopeMembersDialog({ open, onOpenChange, label, scopeType, scope
           <div className="flex gap-2 items-center">
             <Select value={selectedEmpId} onValueChange={(v) => setSelectedEmpId(v ?? "")}>
               <SelectTrigger className="bg-background flex-1">
-                <SelectValue placeholder="Select employee to add..." />
+                {selectedEmpId ? (
+                  <span className="truncate">
+                    {(() => {
+                      const emp = availableEmployees.find((e) => e.id === selectedEmpId);
+                      return emp ? `${emp.name} — ${emp.email}` : selectedEmpId;
+                    })()}
+                  </span>
+                ) : (
+                  <SelectValue placeholder="Select employee to add..." />
+                )}
               </SelectTrigger>
               <SelectContent>
                 {availableEmployees.map((e) => (

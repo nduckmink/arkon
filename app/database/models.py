@@ -167,7 +167,7 @@ class WikiPage(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    slug: Mapped[str] = mapped_column(String(300), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(300), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     page_type: Mapped[str] = mapped_column(String(30), nullable=False)
     content_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -238,36 +238,6 @@ class Note(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
-
-# ---------------------------------------------------------------------------
-# Contacts
-# ---------------------------------------------------------------------------
-
-class Contact(Base):
-    __tablename__ = "contacts"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    role: Mapped[Optional[str]] = mapped_column(String(200))
-    phone: Mapped[Optional[str]] = mapped_column(String(50))
-    email: Mapped[Optional[str]] = mapped_column(String(200))
-    topics: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String))
-    note: Mapped[Optional[str]] = mapped_column(Text)
-    department_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    department: Mapped[Optional["Department"]] = relationship()
 
 
 # ---------------------------------------------------------------------------

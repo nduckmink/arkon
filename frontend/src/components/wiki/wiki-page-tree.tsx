@@ -22,9 +22,18 @@ function useDebounce<T>(value: T, delay: number): T {
 export function WikiPageTree({
   activeSlug,
   onDeleted,
+  pagesUrl,
+  linkQueryParams,
+  onPageSelect,
 }: {
   activeSlug?: string;
   onDeleted?: () => void;
+  /** Override the API URL to load pages from (default: /api/wiki/pages) */
+  pagesUrl?: string;
+  /** Query params to append to page links (e.g. "?scopeType=project&scopeId=xxx") */
+  linkQueryParams?: string;
+  /** If provided, clicks call this instead of navigating via Link */
+  onPageSelect?: (slug: string) => void;
 }) {
   const pathname = usePathname();
   const [pages, setPages] = React.useState<WikiPageSummary[]>([]);
@@ -41,11 +50,12 @@ export function WikiPageTree({
   const debouncedSearch = useDebounce(search, 150);
 
   const loadPages = React.useCallback(() => {
-    api<WikiPageSummary[]>("/api/wiki/pages?limit=200")
+    const url = pagesUrl || "/api/wiki/pages?limit=200";
+    api<WikiPageSummary[]>(url)
       .then((data) => setPages(Array.isArray(data) ? data : []))
       .catch(() => setPages([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [pagesUrl]);
 
   React.useEffect(() => {
     loadPages();
@@ -232,18 +242,33 @@ export function WikiPageTree({
                               : "hover:bg-accent/50"
                           )}
                         >
-                          <Link
-                            href={`/wiki/${page.slug}`}
-                            className={cn(
-                              "flex-1 flex items-center gap-2 px-2 py-1.5 text-xs min-w-0 transition-all",
-                              isActive
-                                ? "text-primary font-medium"
-                                : "text-muted-foreground hover:text-foreground"
-                            )}
-                            title={page.summary || page.title}
-                          >
-                            <span className="truncate">{page.title}</span>
-                          </Link>
+                          {onPageSelect ? (
+                            <button
+                              onClick={() => onPageSelect(page.slug)}
+                              className={cn(
+                                "flex-1 flex items-center gap-2 px-2 py-1.5 text-xs min-w-0 transition-all text-left",
+                                isActive
+                                  ? "text-primary font-medium"
+                                  : "text-muted-foreground hover:text-foreground"
+                              )}
+                              title={page.summary || page.title}
+                            >
+                              <span className="truncate">{page.title}</span>
+                            </button>
+                          ) : (
+                            <Link
+                              href={`/wiki/${page.slug}${linkQueryParams || ""}`}
+                              className={cn(
+                                "flex-1 flex items-center gap-2 px-2 py-1.5 text-xs min-w-0 transition-all",
+                                isActive
+                                  ? "text-primary font-medium"
+                                  : "text-muted-foreground hover:text-foreground"
+                              )}
+                              title={page.summary || page.title}
+                            >
+                              <span className="truncate">{page.title}</span>
+                            </Link>
+                          )}
 
                           {/* Delete button — 2-stage */}
                           {isDeleting ? (

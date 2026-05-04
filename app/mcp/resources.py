@@ -32,13 +32,11 @@ def register_resources(mcp: FastMCP):
             "## Browsing & directory\n\n"
             "- **list_sources**: Browse all available source documents\n"
             "- **list_knowledge_types**: See classification scheme\n"
-            "- **get_knowledge_type_docs**: Browse documents by knowledge type\n"
-            "- **find_contacts**: Find internal experts by topic or department\n\n"
+            "- **get_knowledge_type_docs**: Browse documents by knowledge type\n\n"
             "## Guidelines\n\n"
             "1. Always search the wiki before saying you don't know\n"
             "2. Follow `[[wikilinks]]` between pages to discover context\n"
             "3. Cite slugs for wiki facts, source IDs (and page numbers) for raw quotes\n"
-            "4. Suggest a contact when neither wiki nor sources can answer\n"
         )
 
     @mcp.resource("arkon://wiki-index")

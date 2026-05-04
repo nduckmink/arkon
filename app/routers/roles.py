@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.database.models import Role
-from app.services.auth_service import require_admin
+from app.services.auth_service import require_admin, require_permission
 from app.services.permissions import ALL_PERMISSIONS, PERMISSION_GROUPS, PERMISSION_LABELS
 
 router = APIRouter(prefix="/roles", tags=["roles"])
@@ -54,6 +54,34 @@ class PermissionInfo(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Map old permission names → new granular equivalents
+_LEGACY_MAP: dict[str, list[str]] = {
+    "kb.upload":          ["documents.create"],
+    "kb.manage":          ["kb.read", "kb.create", "kb.edit", "kb.delete",
+                           "documents.read", "documents.edit", "documents.delete"],
+    "departments.manage": ["departments.read", "departments.create", "departments.edit", "departments.delete"],
+    "employees.manage":   ["employees.read", "employees.create", "employees.edit", "employees.delete"],
+    "projects.manage":    ["workspaces.read", "workspaces.create", "workspaces.edit", "workspaces.delete"],
+    "projects.read":      ["workspaces.read"],
+    "projects.create":    ["workspaces.create"],
+    "projects.edit":      ["workspaces.edit"],
+    "projects.delete":    ["workspaces.delete"],
+    "settings.manage":    ["settings.read", "settings.edit"],
+    "scopes.manage":      ["scopes.read", "scopes.manage"],
+}
+
+
+def _migrate_permissions(perms: list[str]) -> list[str]:
+    """Convert legacy permission names to their new granular equivalents."""
+    migrated: set[str] = set()
+    for p in perms:
+        if p in _LEGACY_MAP:
+            migrated.update(_LEGACY_MAP[p])
+        else:
+            migrated.add(p)
+    return sorted(migrated)
+
+
 def _validate_permissions(perms: list[str]) -> None:
     invalid = [p for p in perms if p not in ALL_PERMISSIONS]
     if invalid:
@@ -65,7 +93,7 @@ def _to_out(role: Role) -> RoleOut:
         id=role.id,
         name=role.name,
         description=role.description,
-        permissions=role.permissions or [],
+        permissions=_migrate_permissions(role.permissions or []),
         is_system=role.is_system,
     )
 
@@ -75,7 +103,7 @@ def _to_out(role: Role) -> RoleOut:
 # ---------------------------------------------------------------------------
 
 @router.get("/permissions", response_model=list[PermissionInfo])
-async def list_permissions(_admin=Depends(require_admin)):
+async def list_permissions(_user=require_permission("roles.read")):
     """Return all defined permission strings with labels and groups."""
     key_to_group = {
         perm: group
@@ -90,7 +118,7 @@ async def list_permissions(_admin=Depends(require_admin)):
 
 @router.get("", response_model=list[RoleOut])
 async def list_roles(
-    _admin=Depends(require_admin),
+    _user=require_permission("roles.read"),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Role).order_by(Role.is_system.desc(), Role.name))
@@ -100,15 +128,16 @@ async def list_roles(
 @router.post("", response_model=RoleOut, status_code=201)
 async def create_role(
     body: RoleCreate,
-    _admin=Depends(require_admin),
+    _user=require_permission("roles.create"),
     db: AsyncSession = Depends(get_db),
 ):
-    _validate_permissions(body.permissions)
+    migrated = _migrate_permissions(body.permissions)
+    _validate_permissions(migrated)
     role = Role(
         id=uuid.uuid4(),
         name=body.name.strip(),
         description=body.description,
-        permissions=body.permissions,
+        permissions=migrated,
         is_system=False,
     )
     db.add(role)
@@ -121,7 +150,7 @@ async def create_role(
 async def update_role(
     role_id: uuid.UUID,
     body: RoleUpdate,
-    _admin=Depends(require_admin),
+    _user=require_permission("roles.edit"),
     db: AsyncSession = Depends(get_db),
 ):
     role = await db.get(Role, role_id)
@@ -129,8 +158,9 @@ async def update_role(
         raise HTTPException(404, "Role not found")
 
     if body.permissions is not None:
-        _validate_permissions(body.permissions)
-        role.permissions = body.permissions
+        migrated = _migrate_permissions(body.permissions)
+        _validate_permissions(migrated)
+        role.permissions = migrated
 
     if body.description is not None:
         role.description = body.description
@@ -147,7 +177,7 @@ async def update_role(
 @router.delete("/{role_id}", status_code=204)
 async def delete_role(
     role_id: uuid.UUID,
-    _admin=Depends(require_admin),
+    _user=require_permission("roles.delete"),
     db: AsyncSession = Depends(get_db),
 ):
     role = await db.get(Role, role_id)

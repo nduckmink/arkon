@@ -64,6 +64,19 @@ export function RoleDialog({ open, onOpenChange, role, permissions, onSaved }: P
     });
   };
 
+  const toggleGroup = (groupPerms: PermissionInfo[]) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSelected = groupPerms.every((p) => next.has(p.key));
+      if (allSelected) {
+        groupPerms.forEach((p) => next.delete(p.key));
+      } else {
+        groupPerms.forEach((p) => next.add(p.key));
+      }
+      return next;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -94,68 +107,104 @@ export function RoleDialog({ open, onOpenChange, role, permissions, onSaved }: P
     return acc;
   }, {});
 
+  const groupEntries = Object.entries(groups);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl">
             {isEdit ? "Edit Role" : "Create Role"}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="role-name">Name</Label>
-            <Input
-              id="role-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              disabled={isEdit && role?.is_system}
-              className="bg-background"
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="role-name">Name</Label>
+              <Input
+                id="role-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                disabled={isEdit && role?.is_system}
+                className="bg-background"
+              />
+            </div>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="role-desc">Description</Label>
-            <Input
-              id="role-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional"
-              className="bg-background"
-            />
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="role-desc">Description</Label>
+              <Input
+                id="role-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional"
+                className="bg-background"
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-3">
-            <Label>Permissions</Label>
-            <div className="flex flex-col gap-4 max-h-64 overflow-y-auto pr-1">
-              {Object.entries(groups).map(([group, perms]) => (
-                <div key={group}>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    {group}
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {perms.map((p) => (
-                      <label
-                        key={p.key}
-                        className="flex items-start gap-2.5 cursor-pointer"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected.has(p.key)}
-                          onChange={() => togglePermission(p.key)}
-                          className="mt-0.5 h-4 w-4 rounded border-border accent-primary cursor-pointer"
-                        />
-                        <div>
-                          <p className="text-sm font-medium leading-none">{p.label}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{p.key}</p>
-                        </div>
-                      </label>
-                    ))}
+            <div className="flex items-center justify-between">
+              <Label className="text-base">Permissions</Label>
+              <span className="text-xs text-muted-foreground">
+                {selected.size} of {permissions.length} selected
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {groupEntries.map(([group, perms]) => {
+                const allChecked = perms.every((p) => selected.has(p.key));
+                const someChecked = perms.some((p) => selected.has(p.key));
+
+                return (
+                  <div
+                    key={group}
+                    className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3"
+                  >
+                    {/* Group header with select-all */}
+                    <label className="flex items-center gap-2.5 cursor-pointer border-b border-border pb-2">
+                      <input
+                        type="checkbox"
+                        checked={allChecked}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someChecked && !allChecked;
+                        }}
+                        onChange={() => toggleGroup(perms)}
+                        className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                      />
+                      <span className="text-sm font-semibold uppercase tracking-wider text-foreground">
+                        {group}
+                      </span>
+                    </label>
+
+                    {/* Individual permissions */}
+                    <div className="flex flex-col gap-2.5">
+                      {perms.map((p) => (
+                        <label
+                          key={p.key}
+                          className="flex items-start gap-2.5 cursor-pointer group"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected.has(p.key)}
+                            onChange={() => togglePermission(p.key)}
+                            className="mt-0.5 h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium leading-none group-hover:text-primary transition-colors">
+                              {p.label}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+                              {p.key}
+                            </p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

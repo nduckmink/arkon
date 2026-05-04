@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.database.models import AuditLog, Employee
-from app.services.auth_service import require_admin
+from app.services.auth_service import require_permission
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -56,7 +56,7 @@ async def get_audit_log(
     decision: Optional[str] = None,
     resource_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("audit.read"),
 ):
     """
     Query audit log with pagination and filters.

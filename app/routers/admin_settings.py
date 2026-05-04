@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.database.models import Source, Contact, Department, Employee
+from app.database.models import Source, Department, Employee
 from app.database.repository import Repository
 from app.services.auth_service import get_current_user, require_permission
 
@@ -23,7 +23,6 @@ router = APIRouter()
 
 class DashboardStats(BaseModel):
     total_sources: int
-    total_contacts: int
     total_departments: int
     total_employees: int
 
@@ -33,7 +32,6 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
     repo = Repository(db)
     return DashboardStats(
         total_sources=await repo.count(Source),
-        total_contacts=await repo.count(Contact),
         total_departments=await repo.count(Department),
         total_employees=await repo.count(Employee),
     )
@@ -71,7 +69,7 @@ async def get_settings(
 async def update_settings(
     body: SettingsUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("settings.manage"),
+    _user: Employee = require_permission("settings.edit"),
 ):
     """Update config values in database."""
     from app.services.config_service import ConfigService

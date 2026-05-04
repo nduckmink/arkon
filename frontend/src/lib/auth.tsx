@@ -17,6 +17,7 @@ export type User = {
   role: "admin" | "employee";
   department_id: string;
   department_name: string;
+  permissions: string[];
 };
 
 type AuthState = {
@@ -25,6 +26,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
+  hasPermission: (perm: string) => boolean;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -42,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: "admin" | "employee";
         department_id: string;
         department_name: string;
+        permissions: string[];
       }>("/api/auth/me");
       setUser(data);
     } catch (err) {
@@ -80,8 +83,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const hasPermission = useCallback(
+    (perm: string) => {
+      if (!user) return false;
+      if (user.role === "admin") return true;
+      return user.permissions?.includes(perm) ?? false;
+    },
+    [user]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh, hasPermission }}>
       {children}
     </AuthContext.Provider>
   );

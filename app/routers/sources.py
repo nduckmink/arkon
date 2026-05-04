@@ -119,7 +119,7 @@ async def list_sources(
     department_id: Optional[uuid.UUID] = Query(None),
     status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("documents.read"),
 ):
     stmt = (
         select(Source)
@@ -148,7 +148,7 @@ async def list_sources(
 async def get_source(
     source_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("documents.read"),
 ):
     source = (await db.execute(
         select(Source)
@@ -185,7 +185,7 @@ async def get_source(
 async def get_source_progress(
     source_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _admin: Employee = Depends(require_admin),
+    _user: Employee = require_permission("documents.read"),
 ):
     source = await db.get(Source, source_id)
     if not source:
@@ -210,7 +210,7 @@ async def upload_source(
     scope_type: Optional[str] = Form(None),
     scope_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
-    user: Employee = require_permission("kb.upload"),
+    user: Employee = require_permission("documents.create"),
 ):
     file_data = await file.read()
     file_name = file.filename or "unknown"
@@ -273,7 +273,7 @@ async def upload_source(
 async def add_url_source(
     req: SourceCreateURL,
     db: AsyncSession = Depends(get_db),
-    user: Employee = require_permission("kb.upload"),
+    user: Employee = require_permission("documents.create"),
 ):
     repo = Repository(db)
     source = Source(
@@ -318,7 +318,7 @@ async def update_source(
     source_id: uuid.UUID,
     body: SourceUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("kb.manage"),
+    _user: Employee = require_permission("documents.edit"),
 ):
     source = await db.get(Source, source_id)
     if not source:
@@ -351,7 +351,7 @@ async def recompile_source(
     source_id: uuid.UUID,
     force: bool = Query(False, description="If true, detach this source from existing wiki pages first"),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("kb.manage"),
+    _user: Employee = require_permission("documents.edit"),
 ):
     """
     Re-run the wiki compiler for this source. Without `force`, the compiler
@@ -408,7 +408,7 @@ async def recompile_source(
 async def delete_source(
     source_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("kb.manage"),
+    _user: Employee = require_permission("documents.delete"),
 ):
     repo = Repository(db)
     source = await repo.get_by_id(Source, source_id)

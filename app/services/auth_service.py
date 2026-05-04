@@ -86,7 +86,7 @@ async def authenticate_employee(
     stmt = (
         select(Employee)
         .where(Employee.email == email, Employee.is_active == True)
-        .options(selectinload(Employee.department))
+        .options(selectinload(Employee.department), selectinload(Employee.custom_role))
     )
     result = await db.execute(stmt)
     employee = result.scalar_one_or_none()
@@ -157,17 +157,25 @@ def require_permission(permission: str):
     """
     FastAPI dependency factory — checks a specific permission on the employee's custom role.
     Admins bypass all permission checks.
+    Legacy permission names are auto-migrated during the check.
 
-    Usage: Depends(require_permission("kb.upload"))
+    Usage: Depends(require_permission("kb.read"))
     """
     async def _check(current_user: Employee = Depends(get_current_user)) -> Employee:
         if current_user.role == "admin":
             return current_user
-        if (
-            current_user.custom_role
-            and permission in (current_user.custom_role.permissions or [])
-        ):
-            return current_user
+        if current_user.custom_role:
+            # Auto-migrate legacy permission names stored in the DB
+            stored = current_user.custom_role.permissions or []
+            from app.routers.roles import _LEGACY_MAP
+            effective: set[str] = set()
+            for p in stored:
+                if p in _LEGACY_MAP:
+                    effective.update(_LEGACY_MAP[p])
+                else:
+                    effective.add(p)
+            if permission in effective:
+                return current_user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Permission required: {permission}",

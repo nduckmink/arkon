@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.database.models import Note, Employee
 from app.database.repository import Repository
-from app.services.auth_service import get_current_user, require_admin
+from app.services.auth_service import get_current_user, require_permission
 
 router = APIRouter()
 
@@ -50,7 +50,7 @@ async def list_notes(db: AsyncSession = Depends(get_db), _user: Employee = Depen
 
 
 @router.post("/notes", response_model=NoteResponse)
-async def create_note(req: NoteCreate, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
+async def create_note(req: NoteCreate, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("kb.create")):
     repo = Repository(db)
     note = Note(**req.model_dump())
     note = await repo.create(note)
@@ -63,7 +63,7 @@ async def create_note(req: NoteCreate, db: AsyncSession = Depends(get_db), _admi
 
 
 @router.delete("/notes/{note_id}")
-async def delete_note(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), _admin: Employee = Depends(require_admin)):
+async def delete_note(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), _user: Employee = require_permission("kb.delete")):
     repo = Repository(db)
     deleted = await repo.delete_by_id(Note, note_id)
     if not deleted:

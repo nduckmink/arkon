@@ -80,22 +80,23 @@ export function ProjectList({ projects, loading, isAdmin, onEdit, onOpen, onRefr
         {projects.map((project) => (
           <div
             key={project.id}
-            className="bg-card rounded-xl border border-border shadow-sahara p-5 flex flex-col gap-3"
+            onClick={() => onOpen(project)}
+            className="bg-card rounded-xl border border-border shadow-sahara p-5 flex flex-col gap-3 cursor-pointer hover:border-primary/20 hover:bg-accent/20 hover:shadow-md transition-all group"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary text-base">{project.workspace_type === 'customer' ? 'domain' : 'folder_special'}</span>
-                  <h3 className="font-semibold text-sm truncate">{project.name}</h3>
+                  <h3 className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{project.name}</h3>
                 </div>
                 {project.description && (
                   <p className="text-xs text-muted-foreground line-clamp-2">{project.description}</p>
                 )}
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 shrink-0">
                 <Badge
                   variant="outline"
-                  className={`text-xs shrink-0 ${
+                  className={`text-xs ${
                     project.workspace_type === "customer"
                       ? "text-violet-600 border-violet-300"
                       : "text-sky-600 border-sky-300"
@@ -107,16 +108,39 @@ export function ProjectList({ projects, loading, isAdmin, onEdit, onOpen, onRefr
                   variant="outline"
                   className={
                     project.status === "active"
-                      ? "text-green-600 border-green-300 shrink-0"
-                      : "text-muted-foreground border-muted shrink-0"
+                      ? "text-green-600 border-green-300"
+                      : "text-muted-foreground border-muted"
                   }
                 >
                   {project.status}
                 </Badge>
+
+                {isAdmin && (
+                  <div onClick={(e) => e.stopPropagation()} className="ml-1">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-accent text-muted-foreground transition-colors">
+                        <span className="material-symbols-outlined text-base">more_vert</span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(project); }}>
+                          <span className="material-symbols-outlined text-base mr-2">edit</span>
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <span className="material-symbols-outlined text-base mr-2">delete</span>
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
               <span className="flex items-center gap-1">
                 <span className="material-symbols-outlined text-sm">group</span>
                 {project.member_count} members
@@ -125,39 +149,6 @@ export function ProjectList({ projects, loading, isAdmin, onEdit, onOpen, onRefr
                 <span className="material-symbols-outlined text-sm">description</span>
                 {project.source_count} docs
               </span>
-            </div>
-
-            <div className="flex items-center justify-between pt-1 border-t border-border">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onOpen(project)}
-                className="text-xs h-7 px-2"
-              >
-                <span className="material-symbols-outlined text-sm mr-1">open_in_new</span>
-                Open
-              </Button>
-
-              {isAdmin && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-accent">
-                    <span className="material-symbols-outlined text-base">more_vert</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => onEdit(project)}>
-                      <span className="material-symbols-outlined text-base mr-2">edit</span>
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => handleDelete(project.id)}
-                      className="text-destructive"
-                    >
-                      <span className="material-symbols-outlined text-base mr-2">delete</span>
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
             </div>
           </div>
         ))}
