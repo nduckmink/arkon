@@ -5,12 +5,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form, Query
 from loguru import logger
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.database.models import Employee, Skill
 from app.services.auth_service import get_current_user, require_admin, require_permission
-from app.services.skill_service import SkillService, TagService
+from app.services.skill_service import SkillService
 from app.services.permission_engine import (
     _get_user_permissions,
     build_skill_filter,
@@ -26,9 +27,8 @@ class SkillResponse(BaseModel):
     name: str
     slug: str
     description: Optional[str]
-    tags: List[str] = []
-    department_id: Optional[uuid.UUID]
-    department_name: Optional[str] = None
+    department_ids: List[uuid.UUID] = []
+    department_names: List[str] = []
     current_version: int
     version_hash: Optional[str]
     status: str
@@ -38,13 +38,6 @@ class SkillResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def transform_tags(cls, v):
-        if isinstance(v, list):
-            return [t.name if hasattr(t, 'name') else t for t in v]
-        return v
 
 
 class SkillVersionResponse(BaseModel):
@@ -66,40 +59,24 @@ class SkillDeleteRequest(BaseModel):
     ids: List[uuid.UUID]
 
 
-class SkillBulkTagRequest(BaseModel):
-    skill_ids: List[uuid.UUID]
-    tags: List[str]
-
-
-class SkillBulkTagSyncRequest(BaseModel):
-    skill_ids: List[uuid.UUID]
-    add_tags: List[str] = []
-    remove_tags: List[str] = []
 
 
 class SkillBulkVisibilityRequest(BaseModel):
     skill_ids: List[uuid.UUID]
     scope_type: str
     scope_id: Optional[uuid.UUID] = None
-    department_id: Optional[uuid.UUID] = None  # Legacy support
+    department_ids: Optional[List[uuid.UUID]] = None  # Legacy support
 
 
 class SkillUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    department_id: Optional[uuid.UUID] = None
+    department_ids: Optional[List[uuid.UUID]] = None
     scope_type: Optional[str] = None
     scope_id: Optional[uuid.UUID] = None
     increment_version: bool = False
-    tags: Optional[List[str]] = None
 
 
-class TagCreateRequest(BaseModel):
-    names: List[str]
-
-
-class TagDeleteRequest(BaseModel):
-    names: List[str]
 
 
 # --- Skill Routes ---
@@ -107,8 +84,7 @@ class TagDeleteRequest(BaseModel):
 @router.post("/skills/upload")
 async def upload_skills(
     files: List[UploadFile] = File(...),
-    categories: Optional[str] = Form(None),
-    department_id: Optional[uuid.UUID] = Form(None),
+    department_ids: Optional[List[uuid.UUID]] = Form(None),
     scope_type: str = Form("global"),
     scope_id: Optional[uuid.UUID] = Form(None),
     force: bool = Form(False),
@@ -123,7 +99,7 @@ async def upload_skills(
             raise HTTPException(403, "Permission required: skill:create")
         
         # User only has own_dept scope
-        if department_id and department_id != user.department_id:
+        if department_ids and any(d_id != user.department_id for d_id in department_ids):
             raise HTTPException(403, "You can only assign skills to your own department")
         if scope_type == "department" and scope_id != user.department_id:
             raise HTTPException(403, "You can only assign skills to your own department")
@@ -133,7 +109,7 @@ async def upload_skills(
             raise HTTPException(403, "You do not have permission to create global skills")
 
     results = await SkillService.upload_skills(
-        db, files, categories, department_id, scope_type, scope_id, force, user.id
+        db, files, department_ids, scope_type, scope_id, force, user.id
     )
     return {"results": results}
 
@@ -167,7 +143,6 @@ async def inspect_skill_zip(
 @router.get("/skills", response_model=SkillListResponse)
 async def list_skills(
     q: Optional[str] = Query(None),
-    tag: Optional[List[str]] = Query(None),
     department_id: Optional[uuid.UUID] = Query(None),
     scope_type: Optional[str] = Query(None),
     scope_id: Optional[uuid.UUID] = Query(None),
@@ -190,13 +165,14 @@ async def list_skills(
     # The service needs to handle this logic: (department_id IN allowed_depts) OR (department_id IS NULL)
     
     skills, total = await SkillService.list_skills(
-        db, q, tag, department_id, scope_type, scope_id, ids, cursor, limit,
+        db, q, department_id, scope_type, scope_id, ids, cursor, limit,
         allowed_department_ids=allowed_depts if needs_filter else None
     )
     items = []
     for s in skills:
         resp = SkillResponse.model_validate(s)
-        resp.department_name = s.department.name if s.department else None
+        resp.department_ids = [sd.department_id for sd in s.departments]
+        resp.department_names = [sd.department.name for sd in s.departments]
         items.append(resp)
     return {"items": items, "total": total}
 
@@ -222,44 +198,6 @@ async def bulk_delete_skills(
     return {"message": f"Queued {count} skills for deletion"}
 
 
-@router.post("/skills/bulk/tags")
-async def bulk_add_tags(
-    req: SkillBulkTagRequest,
-    db: AsyncSession = Depends(get_db),
-    user: Employee = Depends(get_current_user),
-):
-    """Add a set of tags to multiple skills without removing existing ones."""
-    if not req.skill_ids or not req.tags:
-        return {"message": "No skills or tags provided"}
-        
-    for skill_id in req.skill_ids:
-        skill = await db.get(Skill, skill_id)
-        if not skill: continue
-        if not await can_access_skill(db, user, skill, "edit"):
-            raise HTTPException(403, f"Access denied for skill {skill.name}")
-
-    count = await SkillService.bulk_add_tags(db, req.skill_ids, req.tags)
-    return {"message": f"Added tags to {count} skills"}
-
-
-@router.post("/skills/bulk/tags/update")
-async def bulk_update_tags(
-    req: SkillBulkTagSyncRequest,
-    db: AsyncSession = Depends(get_db),
-    user: Employee = Depends(get_current_user),
-):
-    """Perform a bulk update of tags (add and remove) for multiple skills."""
-    if not req.skill_ids:
-        return {"message": "No skills provided"}
-        
-    for skill_id in req.skill_ids:
-        skill = await db.get(Skill, skill_id)
-        if not skill: continue
-        if not await can_access_skill(db, user, skill, "edit"):
-            raise HTTPException(403, f"Access denied for skill {skill.name}")
-
-    count = await SkillService.bulk_update_tags(db, req.skill_ids, req.add_tags, req.remove_tags)
-    return {"message": f"Updated tags for {count} skills"}
 
 
 @router.post("/skills/bulk/department")
@@ -301,50 +239,128 @@ async def bulk_change_visibility(
     return {"updated": count, "message": f"Updated visibility for {count} skills"}
 
 
-# --- Tag Routes ---
 
-@router.get("/tags")
-async def list_tags(
-    q: Optional[str] = Query(None),
-    limit: int = Query(1000),
-    offset: int = Query(0),
+
+# --- Skill File Exploration ---
+
+TEXT_EXTENSIONS = {
+    ".py", ".md", ".txt", ".json", ".yaml", ".yml", ".sh", ".js", ".ts", ".tsx", 
+    ".html", ".css", ".sql", ".env", ".cfg", ".ini", ".xml", ".csv", ".bat", ".ps1"
+}
+
+def is_text_file(filename: str) -> bool:
+    import os
+    _, ext = os.path.splitext(filename.lower())
+    return ext in TEXT_EXTENSIONS
+
+@router.get("/skills/{skill_id}/files")
+async def list_skill_files(
+    skill_id: uuid.UUID,
+    version: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("skill:read"),
+    user: Employee = Depends(get_current_user),
 ):
-    """Retrieve all tags currently stored in the system."""
-    items, total = await TagService.list_tags(db, q, limit, offset)
-    return {"items": items, "total": total}
+    """List all files within a skill's storage prefix in MinIO."""
+    from app.services.storage_service import storage_service
+    from app.database.models import SkillVersion
+    
+    skill = await db.get(Skill, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    
+    if not await can_access_skill(db, user, skill, "read"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    logger.info(f"Listing files for skill {skill_id} (slug: {skill.slug}), version: {version}")
+
+    # Determine prefix
+    if version:
+        stmt = select(SkillVersion).where(SkillVersion.skill_id == skill_id, SkillVersion.version_number == version)
+        v_res = await db.execute(stmt)
+        v_obj = v_res.scalars().first()
+        if not v_obj:
+            raise HTTPException(status_code=404, detail=f"Version {version} not found")
+        prefix = v_obj.storage_path
+    else:
+        prefix = skill.storage_path
+
+    if not prefix:
+        logger.warning(f"No storage_path found for skill {skill_id} version {version}")
+        return []
+
+    # List objects in MinIO
+    from app.config import settings
+    logger.info(f"Listing MinIO objects with bucket={settings.minio_bucket} prefix={prefix}")
+    # Ensure prefix ends with / for clean relative path replacement
+    prefix_for_list = prefix if prefix.endswith("/") else f"{prefix}/"
+    logger.info(f"[Debug] Listing files: skill_id={skill_id}, version={version}, prefix_for_list={prefix_for_list}")
+    objects = storage_service.client.list_objects(settings.minio_bucket, prefix=prefix_for_list, recursive=True)
+    
+    files = []
+    for obj in objects:
+        # Extract relative path from full object name
+        rel_path = obj.object_name.replace(prefix_for_list, "", 1)
+        if not rel_path: continue
+        
+        files.append({
+            "path": rel_path,
+            "size": obj.size,
+            "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
+            "is_text": is_text_file(rel_path)
+        })
+        
+    return sorted(files, key=lambda x: x["path"])
 
 
-@router.post("/tags/bulk")
-async def bulk_create_tags(
-    req: TagCreateRequest,
+@router.get("/skills/{skill_id}/files/content")
+async def get_skill_file_content(
+    skill_id: uuid.UUID,
+    path: str,
+    version: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("skill:edit"),
+    user: Employee = Depends(get_current_user),
 ):
-    """Create multiple tags in bulk. Skips names that already exist."""
-    count = await TagService.bulk_create_tags(db, req.names)
-    return {"message": f"Added {count} new tags", "added": count}
+    """Fetch text content for a specific file within a skill."""
+    from app.services.storage_service import storage_service
+    from app.database.models import SkillVersion
+    
+    skill = await db.get(Skill, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    
+    if not await can_access_skill(db, user, skill, "read"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine prefix
+    if version:
+        stmt = select(SkillVersion).where(SkillVersion.skill_id == skill_id, SkillVersion.version_number == version)
+        v_res = await db.execute(stmt)
+        v_obj = v_res.scalars().first()
+        if not v_obj:
+            raise HTTPException(status_code=404, detail=f"Version {version} not found")
+        prefix = v_obj.storage_path
+    else:
+        prefix = skill.storage_path
 
+    if not prefix:
+        raise HTTPException(status_code=404, detail="Skill storage path not found")
 
-@router.delete("/tags/bulk")
-async def bulk_delete_tags(
-    req: TagDeleteRequest,
-    db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("skill:edit"),
-):
-    """Permanently delete multiple tags from the system."""
-    count = await TagService.bulk_delete_tags(db, req.names)
-    return {"message": f"Deleted {count} tags"}
+    if not is_text_file(path):
+        raise HTTPException(status_code=400, detail="Only text-based files can be viewed.")
 
-
-@router.get("/skills/tags")
-async def get_all_tags(
-    db: AsyncSession = Depends(get_db),
-    _user: Employee = require_permission("skill:read"),
-):
-    """Get all unique tags used across all skills."""
-    return await TagService.get_all_used_tags(db)
+    # Ensure exactly one slash between prefix and path
+    p = prefix.rstrip("/")
+    f = path.lstrip("/")
+    full_path = f"{p}/{f}"
+    
+    logger.info(f"[Debug] Fetching content: skill_id={skill_id}, version={version}, prefix={prefix}, path={path}, full_path={full_path}")
+    
+    try:
+        content_bytes = storage_service.download_file(full_path)
+        return {"content": content_bytes.decode("utf-8", errors="ignore")}
+    except Exception as e:
+        logger.error(f"[Debug] Failed to read skill file {full_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read file content: {str(e)}")
 
 
 # --- Individual Skill Routes (MUST BE LAST) ---
@@ -364,7 +380,8 @@ async def get_skill(
         raise HTTPException(status_code=403, detail="Access denied")
 
     resp = SkillResponse.model_validate(skill)
-    resp.department_name = skill.department.name if skill.department else None
+    resp.department_ids = [sd.department_id for sd in skill.departments]
+    resp.department_names = [sd.department.name for sd in skill.departments]
     return resp
 
 
@@ -425,7 +442,7 @@ async def update_skill(
     perms = _get_user_permissions(user)
     if user.role != "admin" and "skill:edit:all" not in perms:
         # User only has own_dept scope
-        if req.department_id and req.department_id != user.department_id:
+        if req.department_ids and any(d_id != user.department_id for d_id in req.department_ids):
             raise HTTPException(403, "You can only assign skills to your own department")
         if req.scope_type == "department" and req.scope_id != user.department_id:
             raise HTTPException(403, "You can only assign skills to your own department")
@@ -439,5 +456,6 @@ async def update_skill(
     updated_skill = await SkillService.update_skill(db, slug, req_data)
     
     resp = SkillResponse.model_validate(updated_skill)
-    resp.department_name = updated_skill.department.name if updated_skill.department else None
+    resp.department_ids = [sd.department_id for sd in updated_skill.departments]
+    resp.department_names = [sd.department.name for sd in updated_skill.departments]
     return resp

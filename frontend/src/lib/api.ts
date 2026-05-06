@@ -3,7 +3,7 @@
  * All API calls go through this module.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5055";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL !== undefined ? process.env.NEXT_PUBLIC_API_URL : "http://localhost:5055";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 type RequestOptions = {
@@ -62,8 +62,10 @@ export async function api<T = unknown>(
   }
 
   let res: Response;
+  const fullUrl = `${API_BASE}${path}`;
+  console.log(`[API] Fetching: ${method} ${fullUrl}`);
   try {
-    res = await fetch(`${API_BASE}${path}`, config);
+    res = await fetch(fullUrl, config);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new ApiError(0, "Request timed out");

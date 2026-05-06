@@ -25,6 +25,7 @@ from app.database.models import (
     Source,
     SourceDepartment,
     Skill,
+    SkillDepartment,
     WorkspaceRole,
     WORKSPACE_ROLE_HIERARCHY,
 )
@@ -179,13 +180,12 @@ async def can_access_skill(
     if f"skill:{action}:all" in permissions:
         return True
 
-    if f"skill:{action}:own_dept" not in permissions:
-        return False
-
-    if not skill.department_id:
+    # Skill visible if it's Global (no depts) OR user's dept is in skill's depts
+    skill_dept_ids = {sd.department_id for sd in skill.departments}
+    if not skill_dept_ids:
         return True
 
-    return skill.department_id == user.department_id
+    return user.department_id in skill_dept_ids
 
 
 def build_skill_filter(user: Employee, action: str = "read"):
@@ -202,6 +202,7 @@ def build_skill_filter(user: Employee, action: str = "read"):
 
     if f"skill:{action}:own_dept" in permissions:
         # Filter: skill has no department (global) OR matches user's department
+        # This will be handled in SkillService.list_skills via allowed_department_ids
         return True, [user.department_id]
 
     return True, None

@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SkillFileExplorer } from "@/components/skills/skill-file-explorer";
 
 interface SkillVersion {
   version_number: number;
@@ -174,7 +175,14 @@ export default function SkillDetailPage() {
     return null;
   }
 
-  const dateStr = new Date(skill.updated_at).toLocaleString();
+  const dateStr = new Date(skill.updated_at).toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
   return (
     <div className="flex flex-col gap-8 pb-12 animate-in fade-in duration-500">
@@ -207,32 +215,12 @@ export default function SkillDetailPage() {
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
-            <div className="bg-secondary/40 px-6 py-3 border-b border-border">
-              <h3 className="text-[13px] font-bold text-foreground flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm">description</span>
-                SKILL.md
-              </h3>
-            </div>
-            <div className="p-6 md:p-14">
-              {skill.description ? (
-                <div className="markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkFrontmatter]}>
-                    {skill.description.replace(/^---[\s\S]*?---\n?/, "")}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <div className="py-20 text-center text-muted-foreground italic bg-card">
-                  No documentation found.
-                </div>
-              )}
-            </div>
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="lg:col-span-3 space-y-6">
+          <SkillFileExplorer skillId={skill.id} version={viewingVersion} />
         </div>
 
-        <div className="space-y-6">
+        <div className="lg:col-span-1 space-y-6">
           <div className="bg-card rounded-xl border border-border p-8 space-y-8">
             <section>
               <h4 className="text-xs font-bold text-muted-foreground uppercase mb-4 tracking-wider">Status</h4>
@@ -291,30 +279,7 @@ export default function SkillDetailPage() {
             </section>
 
             <section>
-              <h4 className="text-xs font-bold text-muted-foreground uppercase mb-4 tracking-wider">Department</h4>
-              <div className="flex items-center gap-2.5 text-foreground">
-                <span className="material-symbols-outlined text-lg text-primary/60">corporate_fare</span>
-                <span className="text-lg font-bold leading-none">{skill.department_name || "Global"}</span>
-              </div>
-            </section>
-
-            <section>
-              <h4 className="text-xs font-bold text-muted-foreground uppercase mb-4 tracking-wider">Tags</h4>
-              <div className="flex flex-wrap gap-2">
-                {skill.tags && skill.tags.length > 0 ? (
-                  skill.tags.map(t => (
-                    <Badge key={t} variant="outline" className="text-xs px-3 py-1 border-primary/20 text-primary bg-primary/5">
-                      {t}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground italic">None</span>
-                )}
-              </div>
-            </section>
-
-            <section>
-              <h4 className="text-xs font-bold text-muted-foreground uppercase mb-4 tracking-wider">SHA-256 Hash</h4>
+              <h4 className="text-xs font-bold text-muted-foreground uppercase mb-4 tracking-wider">Access</h4>
               <div className="text-xs font-mono break-all bg-secondary/30 p-4 rounded-xl border border-border text-muted-foreground leading-relaxed">
                 {skill.version_hash || "N/A"}
               </div>

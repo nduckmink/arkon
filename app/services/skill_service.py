@@ -12,76 +12,11 @@ from sqlalchemy import select, or_, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import Skill, SkillVersion, Tag, Department
+from app.database.models import Skill, SkillVersion, Department, SkillDepartment
 from app.utils.text import slugify
 from app.worker import get_arq_pool
 from app.services.storage_service import storage_service
 
-class TagService:
-    @staticmethod
-    async def get_or_create_tags(db: AsyncSession, tag_names: List[str]) -> List[Tag]:
-        """Helper to get existing tags or create new ones"""
-        tag_names = [t.strip().lower() for t in tag_names if t.strip()]
-        if not tag_names:
-            return []
-            
-        stmt = select(Tag).where(Tag.name.in_(tag_names))
-        res = await db.execute(stmt)
-        existing_tags = {t.name: t for t in res.scalars().all()}
-        
-        tag_objs = []
-        for name in tag_names:
-            if name in existing_tags:
-                tag_objs.append(existing_tags[name])
-            else:
-                new_tag = Tag(name=name)
-                db.add(new_tag)
-                tag_objs.append(new_tag)
-        await db.flush()
-        return tag_objs
-
-    @staticmethod
-    async def list_tags(db: AsyncSession, q: Optional[str], limit: int, offset: int) -> Tuple[List[str], int]:
-        stmt = select(Tag).order_by(Tag.name.asc())
-        count_stmt = select(func.count()).select_from(Tag)
-        if q:
-            stmt = stmt.where(Tag.name.ilike(f"%{q}%"))
-            count_stmt = count_stmt.where(Tag.name.ilike(f"%{q}%"))
-        total_res = await db.execute(count_stmt)
-        total = total_res.scalar() or 0
-        stmt = stmt.limit(limit).offset(offset)
-        res = await db.execute(stmt)
-        return [t.name for t in res.scalars().all()], total
-
-    @staticmethod
-    async def bulk_create_tags(db: AsyncSession, names: List[str]) -> int:
-        names = [n.strip().lower() for n in names if n.strip()]
-        if not names:
-            return 0
-        stmt = select(Tag).where(Tag.name.in_(names))
-        res = await db.execute(stmt)
-        existing_names = {t.name for t in res.scalars().all()}
-        new_names = [n for n in names if n not in existing_names]
-        for name in new_names:
-            db.add(Tag(name=name))
-        await db.commit()
-        return len(new_names)
-
-    @staticmethod
-    async def bulk_delete_tags(db: AsyncSession, names: List[str]) -> int:
-        from sqlalchemy import delete
-        if not names:
-            return 0
-        stmt = delete(Tag).where(Tag.name.in_(names))
-        await db.execute(stmt)
-        await db.commit()
-        return len(names)
-
-    @staticmethod
-    async def get_all_used_tags(db: AsyncSession) -> List[Tag]:
-        stmt = select(Tag).order_by(Tag.name)
-        res = await db.execute(stmt)
-        return res.scalars().all()
 
 
 class SkillService:
@@ -103,16 +38,13 @@ class SkillService:
     async def upload_skills(
         db: AsyncSession, 
         files: List[Any], 
-        categories: Optional[str], 
-        department_id: Optional[uuid.UUID], 
+        department_ids: Optional[List[uuid.UUID]], 
         scope_type: str,
         scope_id: Optional[uuid.UUID],
         force: bool, 
         current_user_id: uuid.UUID
     ) -> List[Any]:
         pool = await get_arq_pool()
-        tag_names = [c.strip().lower() for c in categories.split(",")] if categories else []
-        tag_objs = await TagService.get_or_create_tags(db, tag_names)
         
         results = []
         duplicates = []
@@ -131,7 +63,7 @@ class SkillService:
                     continue
 
                 # Check existing
-                stmt = select(Skill).where(Skill.name == name).options(selectinload(Skill.tags))
+                stmt = select(Skill).where(Skill.name == name)
                 res = await db.execute(stmt)
                 existing_skill = res.scalars().first()
 
@@ -139,21 +71,21 @@ class SkillService:
                     if not force:
                         duplicates.append(name)
                         continue
-                    # Always prioritize department_id for Skills
-                    if scope_type == "department" or department_id:
+                    # Always prioritize department_ids for Skills
+                    if scope_type == "department" or department_ids:
                         existing_skill.scope_type = "department"
-                        existing_skill.scope_id = scope_id or department_id
-                        existing_skill.department_id = scope_id or department_id
+                        existing_skill.scope_id = scope_id or (department_ids[0] if department_ids else None)
+                        
+                        # Update M2M departments
+                        await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == existing_skill.id))
+                        if department_ids:
+                            for d_id in department_ids:
+                                db.add(SkillDepartment(skill_id=existing_skill.id, department_id=d_id))
                     else:
                         existing_skill.scope_type = "global"
                         existing_skill.scope_id = None
-                        existing_skill.department_id = None
+                        await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == existing_skill.id))
 
-                    
-                    existing_tag_ids = {t.id for t in existing_skill.tags}
-                    for t in tag_objs:
-                        if t.id not in existing_tag_ids:
-                            existing_skill.tags.append(t)
                     
                     if existing_skill.version_hash == file_hash:
                         results.append({"name": name, "status": "updated_metadata", "message": "Metadata updated, content unchanged."})
@@ -165,18 +97,22 @@ class SkillService:
                     existing_skill.version_hash = file_hash
                     returned_obj = existing_skill
                 else:
-                    # For skills, we only care about department vs global
-                    effective_dept_id = scope_id if scope_type == "department" else department_id
+                    # For skills, we only care about departments vs global
+                    effective_dept_ids = [scope_id] if (scope_type == "department" and scope_id) else (department_ids or [])
                     new_skill = Skill(
                         name=name, slug=slugify(name), status="processing", current_version=1,
-                        version_hash=file_hash, tags=tag_objs, 
-                        department_id=effective_dept_id,
-                        scope_type="department" if effective_dept_id else "global",
-                        scope_id=effective_dept_id
+                        version_hash=file_hash, 
+                        scope_type="department" if effective_dept_ids else "global",
+                        scope_id=effective_dept_ids[0] if effective_dept_ids else None
                     )
                     db.add(new_skill)
                     await db.flush()
                     skill_id = new_skill.id
+                    
+                    if effective_dept_ids:
+                        for d_id in effective_dept_ids:
+                            db.add(SkillDepartment(skill_id=skill_id, department_id=d_id))
+                    
                     new_version_num = 1
                     returned_obj = new_skill
 
@@ -198,7 +134,7 @@ class SkillService:
 
             if duplicates and not force:
                 await db.rollback()
-                raise HTTPException(status_code=409, detail={"message": "Duplicate skill names detected", "duplicates": duplicates})
+                raise HTTPException(status_code=409, detail={"message": "Duplicate skill names detected", "conflicts": duplicates})
                 
             await db.commit()
             
@@ -292,7 +228,6 @@ class SkillService:
     async def list_skills(
         db: AsyncSession, 
         q: Optional[str], 
-        tag: Optional[List[str]], 
         department_id: Optional[uuid.UUID], 
         scope_type: Optional[str],
         scope_id: Optional[uuid.UUID],
@@ -301,7 +236,7 @@ class SkillService:
         limit: int,
         allowed_department_ids: Optional[List[uuid.UUID]] = None
     ) -> Tuple[List[Skill], int]:
-        stmt = select(Skill).options(selectinload(Skill.department), selectinload(Skill.tags)).order_by(Skill.updated_at.desc(), Skill.id.desc())
+        stmt = select(Skill).options(selectinload(Skill.departments).selectinload(SkillDepartment.department)).order_by(Skill.updated_at.desc(), Skill.id.desc())
 
         if cursor:
             ref_skill_res = await db.execute(select(Skill).where(Skill.slug == cursor))
@@ -311,7 +246,12 @@ class SkillService:
 
         # --- RBAC Filtering ---
         if allowed_department_ids is not None:
-            rbac_filter = or_(Skill.department_id.in_(allowed_department_ids), Skill.department_id == None)
+            # Skill is visible if it's Global OR user's dept is in skill's depts
+            # This is complex for M2M, usually we use EXISTS
+            rbac_filter = or_(
+                ~Skill.departments.any(), # Global
+                Skill.departments.any(SkillDepartment.department_id.in_(allowed_department_ids))
+            )
             stmt = stmt.where(rbac_filter)
 
         if q:
@@ -321,11 +261,9 @@ class SkillService:
         if ids:
             stmt = stmt.where(Skill.id.in_(ids))
 
-        if tag:
-            stmt = stmt.join(Skill.tags).where(Tag.name.in_(tag)).distinct()
 
         if department_id:
-            stmt = stmt.where(Skill.department_id == department_id)
+            stmt = stmt.where(Skill.departments.any(SkillDepartment.department_id == department_id))
             
         if scope_type:
             stmt = stmt.where(Skill.scope_type == scope_type)
@@ -336,17 +274,18 @@ class SkillService:
         
         # Apply filters to count_stmt as well
         if allowed_department_ids is not None:
-            count_stmt = count_stmt.where(or_(Skill.department_id.in_(allowed_department_ids), Skill.department_id == None))
+            count_stmt = count_stmt.where(or_(
+                ~Skill.departments.any(),
+                Skill.departments.any(SkillDepartment.department_id.in_(allowed_department_ids))
+            ))
             
         if ids:
             count_stmt = count_stmt.where(Skill.id.in_(ids))
         else:
             if q:
                 count_stmt = count_stmt.where(or_(Skill.name.ilike(f"%{q}%"), Skill.description.ilike(f"%{q}%")))
-            if tag:
-                count_stmt = count_stmt.join(Skill.tags).where(Tag.name.in_(tag))
             if department_id:
-                count_stmt = count_stmt.where(Skill.department_id == department_id)
+                count_stmt = count_stmt.where(Skill.departments.any(SkillDepartment.department_id == department_id))
             if scope_type:
                 count_stmt = count_stmt.where(Skill.scope_type == scope_type)
                 if scope_id:
@@ -377,7 +316,7 @@ class SkillService:
             stmt = select(Skill).where(Skill.id == skill_uuid)
         except ValueError:
             stmt = select(Skill).where(Skill.slug == slug)
-        stmt = stmt.options(selectinload(Skill.department), selectinload(Skill.tags))
+        stmt = stmt.options(selectinload(Skill.departments).selectinload(SkillDepartment.department))
         res = await db.execute(stmt)
         skill = res.scalars().first()
         if not skill or skill.status == "deleting":
@@ -482,10 +421,9 @@ class SkillService:
         
         name = req_data.get("name")
         description = req_data.get("description")
-        department_id = req_data.get("department_id")
+        department_ids = req_data.get("department_ids")
         increment_version = req_data.get("increment_version", False)
-        tags = req_data.get("tags")
-        is_department_explicit = "department_id" in req_data.get("_explicit_fields", [])
+        is_department_explicit = "department_ids" in req_data.get("_explicit_fields", [])
         scope_type = req_data.get("scope_type")
         scope_id = req_data.get("scope_id")
         is_scope_explicit = "scope_type" in req_data.get("_explicit_fields", [])
@@ -519,63 +457,31 @@ class SkillService:
             if scope_type == "department" and scope_id:
                 skill.scope_type = "department"
                 skill.scope_id = scope_id
-                skill.department_id = scope_id
+                # Update M2M
+                await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == skill.id))
+                db.add(SkillDepartment(skill_id=skill.id, department_id=scope_id))
             else:
                 skill.scope_type = "global"
                 skill.scope_id = None
-                skill.department_id = None
-        elif department_id is not None or is_department_explicit:
-            if department_id:
+                await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == skill.id))
+        elif department_ids is not None or is_department_explicit:
+            if department_ids:
                 skill.scope_type = "department"
-                skill.scope_id = department_id
-                skill.department_id = department_id
+                skill.scope_id = department_ids[0] # Primary dept for legacy compatibility
+                # Update M2M
+                await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == skill.id))
+                for d_id in department_ids:
+                    db.add(SkillDepartment(skill_id=skill.id, department_id=d_id))
             else:
                 skill.scope_type = "global"
                 skill.scope_id = None
-                skill.department_id = None
+                await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id == skill.id))
 
-        if tags is not None:
-            skill.tags = await TagService.get_or_create_tags(db, tags)
 
         await db.commit()
         await db.refresh(skill)
         return skill
 
-    @staticmethod
-    async def bulk_add_tags(db: AsyncSession, skill_ids: List[uuid.UUID], tags: List[str]) -> int:
-        if not skill_ids or not tags: return 0
-        tag_objs = await TagService.get_or_create_tags(db, tags)
-        stmt = select(Skill).where(Skill.id.in_(skill_ids)).options(selectinload(Skill.tags))
-        res = await db.execute(stmt)
-        skills = res.scalars().all()
-        for skill in skills:
-            existing_tag_names = {t.name for t in skill.tags}
-            for tag in tag_objs:
-                if tag.name not in existing_tag_names:
-                    skill.tags.append(tag)
-        await db.commit()
-        return len(skills)
-
-    @staticmethod
-    async def bulk_update_tags(db: AsyncSession, skill_ids: List[uuid.UUID], add_tags: List[str], remove_tags: List[str]) -> int:
-        if not skill_ids: return 0
-        tag_objs_to_add = await TagService.get_or_create_tags(db, add_tags) if add_tags else []
-        remove_names = {t.strip().lower() for t in remove_tags if t.strip()}
-        
-        stmt = select(Skill).where(Skill.id.in_(skill_ids)).options(selectinload(Skill.tags))
-        res = await db.execute(stmt)
-        skills = res.scalars().all()
-
-        for skill in skills:
-            if remove_names:
-                skill.tags = [t for t in skill.tags if t.name not in remove_names]
-            if tag_objs_to_add:
-                existing_tag_names = {t.name for t in skill.tags}
-                for tag in tag_objs_to_add:
-                    if tag.name not in existing_tag_names:
-                        skill.tags.append(tag)
-        await db.commit()
-        return len(skills)
 
     @staticmethod
     async def bulk_change_scope(
@@ -586,14 +492,20 @@ class SkillService:
     ) -> int:
         if not skill_ids: return 0
         
-        # Sync department_id for compatibility
-        dept_id = scope_id if scope_type == "department" else None
+        # Sync department_ids for compatibility
+        dept_ids = [scope_id] if (scope_type == "department" and scope_id) else []
         
         stmt = sa.update(Skill).where(Skill.id.in_(skill_ids)).values(
             scope_type=scope_type,
-            scope_id=scope_id,
-            department_id=dept_id
+            scope_id=scope_id
         )
         await db.execute(stmt)
+
+        # Update M2M for all skills
+        await db.execute(sa.delete(SkillDepartment).where(SkillDepartment.skill_id.in_(skill_ids)))
+        if dept_ids:
+            for skill_id in skill_ids:
+                for d_id in dept_ids:
+                    db.add(SkillDepartment(skill_id=skill_id, department_id=d_id))
         await db.commit()
         return len(skill_ids)

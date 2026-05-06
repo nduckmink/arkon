@@ -1,4 +1,4 @@
-"""Add AI Skills with scoped permission support.
+"""Add AI Skills with scoped permission support and M2M departments.
 
 Revision ID: 012
 Revises: 011_permission_v2
@@ -25,19 +25,13 @@ def upgrade() -> None:
         skill_status = postgresql.ENUM("active", "processing", "deleting", "deprecated", "archived", name="skill_status")
         skill_status.create(bind)
 
-    # 2. Create skills table with scoping columns
+    # 2. Create skills table with scoping columns (No department_id here anymore)
     op.create_table(
         "skills",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("name", sa.String(200), nullable=False, unique=True),
         sa.Column("slug", sa.String(200), nullable=False, unique=True),
         sa.Column("description", sa.Text, nullable=True),
-        sa.Column(
-            "department_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("departments.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
         sa.Column("current_version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("version_hash", sa.String(64), nullable=True),
         sa.Column("storage_path", sa.String(1000), nullable=True),
@@ -66,7 +60,6 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_skills_slug", "skills", ["slug"], unique=True)
-    op.create_index("ix_skills_department_id", "skills", ["department_id"])
 
     # 3. Create skill_versions table
     op.create_table(
@@ -97,37 +90,21 @@ def upgrade() -> None:
     )
     op.create_index("ix_skill_versions_skill_id", "skill_versions", ["skill_id"])
 
-    # 4. Create tags table
+    # 4. Create skill_departments join table (M2M)
     op.create_table(
-        "tags",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("name", sa.String(100), nullable=False, unique=True),
-    )
-
-    # 5. Create skill_tags association table
-    op.create_table(
-        "skill_tags",
-        sa.Column(
-            "skill_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("skills.id", ondelete="CASCADE"),
-            primary_key=True,
-        ),
-        sa.Column(
-            "tag_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("tags.id", ondelete="CASCADE"),
-            primary_key=True,
-        ),
+        'skill_departments',
+        sa.Column('skill_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('department_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.ForeignKeyConstraint(['department_id'], ['departments.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['skill_id'], ['skills.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('skill_id', 'department_id')
     )
 
 
 def downgrade() -> None:
-    op.drop_table("skill_tags")
-    op.drop_table("tags")
+    op.drop_table('skill_departments')
     op.drop_index("ix_skill_versions_skill_id", table_name="skill_versions")
     op.drop_table("skill_versions")
-    op.drop_index("ix_skills_department_id", table_name="skills")
     op.drop_index("ix_skills_slug", table_name="skills")
     op.drop_table("skills")
     

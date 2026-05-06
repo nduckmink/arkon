@@ -10,18 +10,18 @@ export type Skill = {
   name: string;
   slug: string;
   description: string | null;
-  tags: string[];
-  department_name?: string | null;
+  department_ids?: string[];
+  department_names?: string[];
   current_version: number;
   version_hash?: string | null;
   status: string;
+  scope_type: string;
+  scope_id: string | null;
   updated_at: string;
 };
 
 type SkillCardProps = {
   skill: Skill;
-  isSelected: boolean;
-  onToggleSelect: (id: string) => void;
   onDelete: (id: string, name: string) => void;
   onEdit?: (id: string) => void;
   onClick?: (id: string) => void;
@@ -29,8 +29,6 @@ type SkillCardProps = {
 
 export function SkillCard({
   skill,
-  isSelected,
-  onToggleSelect,
   onDelete,
   onEdit,
   onClick
@@ -47,28 +45,20 @@ export function SkillCard({
       className={cn(
         "bg-card rounded-xl p-5 border transition-all flex flex-col group animate-in fade-in slide-in-from-bottom-2 duration-300 relative",
         skill.status === "deleting" ? "cursor-not-allowed opacity-80" : "cursor-pointer",
-        isSelected
-          ? "border-primary ring-1 ring-primary/20 shadow-lg shadow-primary/5"
-          : "border-border shadow-sahara hover:border-primary/30"
+        "border-border shadow-sahara hover:border-primary/30"
       )}
     >
-      {/* Checkbox */}
-      <div className="absolute top-4 right-4 z-10" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => onToggleSelect(skill.id)}
-          className="w-4 h-4 cursor-pointer accent-primary"
-        />
-      </div>
 
       <div className="flex items-start justify-between mb-3 pr-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-6 h-6 rounded-md bg-secondary/40 flex items-center justify-center shrink-0 transition-colors group-hover:bg-secondary/60">
+            <span className="material-symbols-outlined text-muted-foreground/40 text-[16px] group-hover:scale-110 transition-transform duration-300">auto_awesome</span>
+          </div>
           <div>
             <h3
               className={cn(
-                "text-sm font-semibold text-foreground transition-colors line-clamp-1 font-manrope",
-                skill.status !== "deleting" && "group-hover:text-primary hover:underline decoration-primary/30"
+                "text-sm font-medium text-foreground transition-colors line-clamp-1 font-manrope",
+                skill.status !== "deleting" && "group-hover:text-primary"
               )}
               onClick={(e) => {
                 e.stopPropagation();
@@ -79,10 +69,17 @@ export function SkillCard({
             </h3>
             <div className="flex flex-wrap items-center gap-2 mt-1">
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-bold bg-secondary/50">v{skill.current_version}</Badge>
-              {skill.department_name && (
+              {skill.department_names && skill.department_names.length > 0 ? (
+                skill.department_names.map((dept, idx) => (
+                  <div key={idx} className="flex items-center gap-1 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    <span className="material-symbols-outlined text-[12px]">corporate_fare</span>
+                    {dept}
+                  </div>
+                ))
+              ) : (
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                  <span className="material-symbols-outlined text-[12px]">corporate_fare</span>
-                  {skill.department_name}
+                  <span className="material-symbols-outlined text-[12px]">public</span>
+                  Global
                 </div>
               )}
               <span className={cn(
@@ -96,26 +93,7 @@ export function SkillCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 mb-4 flex-1 overflow-hidden h-[24px]">
-        {skill.tags && skill.tags.length > 0 ? (
-          <>
-            {skill.tags.slice(0, 3).map((tag, idx) => (
-              <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0 border-primary/20 text-primary/80 truncate max-w-[80px]">
-                {tag}
-              </Badge>
-            ))}
-            {skill.tags.length > 3 && (
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-primary/5 border-primary/10 text-primary/60">
-                +{skill.tags.length - 3}
-              </Badge>
-            )}
-          </>
-        ) : (
-          <span className="text-[10px] text-muted-foreground italic">No tags</span>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between pt-3 border-t border-border mt-auto">
+      <div className="pt-3 border-t border-border mt-auto flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
           {dateStr}
         </span>

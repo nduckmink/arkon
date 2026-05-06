@@ -23,23 +23,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type UploadSkillDialogProps = {
-  allTags: string[];
   allDepartments: { id: string; name: string }[];
   onUploaded: () => void;
-  onRefreshTags: () => void;
 };
 
-export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefreshTags }: UploadSkillDialogProps) {
+export function UploadSkillDialog({ allDepartments, onUploaded }: UploadSkillDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
 
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [scopeType, setScopeType] = useState("global");
-  const [scopeId, setScopeId] = useState("");
-  const [tagInput, setTagInput] = useState("");
+  const [deptIds, setDeptIds] = useState<string[]>([]);
   const [force, setForce] = useState(false);
   const [conflictFiles, setConflictFiles] = useState<string[]>([]);
 
@@ -47,10 +44,8 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
 
   const resetForm = () => {
     setSelectedFiles(null);
-    setSelectedTags([]);
     setScopeType("global");
-    setScopeId("");
-    setTagInput("");
+    setDeptIds([]);
     setForce(false);
     setConflictFiles([]);
   };
@@ -65,12 +60,13 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
       for (let i = 0; i < selectedFiles.length; i++) {
         formData.append("files", selectedFiles[i]);
       }
-      formData.append("categories", selectedTags.join(","));
       formData.append("scope_type", scopeType);
       
-      if (scopeType === "department") {
-        formData.append("scope_id", scopeId);
-        formData.append("department_id", scopeId); // Legacy support
+      if (scopeType === "department" && deptIds.length > 0) {
+        deptIds.forEach(id => {
+          formData.append("department_ids", id);
+        });
+        formData.append("scope_id", deptIds[0]); // Legacy support
       }
 
       if (force) {
@@ -79,12 +75,11 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
 
       await apiUpload("/api/skills/upload", formData);
       onUploaded();
-      onRefreshTags();
       setIsOpen(false);
       resetForm();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setConflictFiles(err.data?.conflicts || []);
+        setConflictFiles(err.data?.detail?.conflicts || []);
       } else {
         alert(err instanceof Error ? err.message : "Upload failed");
       }
@@ -93,31 +88,6 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
     }
   };
 
-  const filteredSuggestions = useMemo(() => {
-    if (!tagInput) return [];
-    return allTags.filter(t => 
-      t.toLowerCase().includes(tagInput.toLowerCase()) && 
-      !selectedTags.includes(t)
-    ).slice(0, 5);
-  }, [tagInput, allTags, selectedTags]);
-
-  const toggleTag = (tag: string) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag));
-    } else {
-      setSelectedTags([...selectedTags, tag]);
-    }
-    setTagInput("");
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && tagInput) {
-      e.preventDefault();
-      toggleTag(tagInput);
-    } else if (e.key === "Backspace" && !tagInput && selectedTags.length > 0) {
-      setSelectedTags(selectedTags.slice(0, -1));
-    }
-  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
@@ -135,8 +105,8 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
       <DialogContent className="sm:max-w-[500px]">
         <form onSubmit={handleUpload}>
           <DialogHeader>
-            <DialogTitle>Upload AI Skill</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-2xl font-serif font-semibold tracking-tight text-foreground">Upload AI Skill</DialogTitle>
+            <DialogDescription className="font-manrope">
               Select one or more ZIP packages containing AI skills.
             </DialogDescription>
           </DialogHeader>
@@ -163,27 +133,29 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
               <Label>Visibility</Label>
               <Select value={scopeType} onValueChange={(v) => {
                 setScopeType(v);
-                setScopeId("");
+                setDeptIds([]);
               }}>
                 <SelectTrigger className="bg-secondary/5 h-11">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg">
-                      {scopeType === "global" ? "public" : "domain"}
+                    <span className="material-symbols-outlined text-base text-muted-foreground">
+                      {scopeType === "global" ? "public" : "corporate_fare"}
                     </span>
-                    <span className="capitalize">{scopeType}</span>
+                    <span className="capitalize">
+                      {scopeType === "global" ? "Global" : "Department"}
+                    </span>
                   </div>
                 </SelectTrigger>
                 <SelectContent className="min-w-[240px]">
                   <SelectItem value="global">
                     <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base">public</span>
-                      Global (All employees)
+                      <span className="material-symbols-outlined text-base text-muted-foreground">public</span>
+                      Global (All Departments)
                     </div>
                   </SelectItem>
                   <SelectItem value="department">
                     <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base">domain</span>
-                      Department
+                      <span className="material-symbols-outlined text-base text-muted-foreground">corporate_fare</span>
+                      Specific Departments
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -192,74 +164,38 @@ export function UploadSkillDialog({ allTags, allDepartments, onUploaded, onRefre
 
             {scopeType === "department" && (
               <div className="grid gap-2 animate-in fade-in slide-in-from-top-1">
-                <Label htmlFor="dept">Target Department</Label>
-                <Select value={scopeId} onValueChange={setScopeId}>
-                  <SelectTrigger className="bg-secondary/5 h-11">
-                    <SelectValue>
-                      {allDepartments.find(d => d.id === scopeId)?.name || "Select department..."}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allDepartments.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Target Departments</Label>
+                <div className="bg-secondary/5 rounded-xl border border-border p-3">
+                  <div className="max-h-[200px] pr-4 overflow-y-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 gap-2">
+                      {allDepartments.map((d) => (
+                        <div key={d.id} className="flex items-center space-x-2 group/item">
+                          <Checkbox 
+                            id={`upload-dept-${d.id}`} 
+                            checked={deptIds.includes(d.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setDeptIds([...deptIds, d.id]);
+                              } else {
+                                setDeptIds(deptIds.filter(id => id !== d.id));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`upload-dept-${d.id}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer group-hover/item:text-primary transition-colors"
+                          >
+                            {d.name}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+            
               </div>
             )}
 
-            <div className="grid gap-2 relative">
-              <Label>Tags</Label>
-              <div
-                className={cn(
-                  "flex flex-wrap gap-1.5 p-2 min-h-[42px] border border-border rounded-md bg-secondary/5 transition-all cursor-text",
-                  "focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 focus-within:bg-background"
-                )}
-                onClick={() => inputRef.current?.focus()}
-              >
-                {selectedTags.map(t => (
-                  <Badge
-                    key={t}
-                    variant="secondary"
-                    className="pl-2 pr-1.5 py-0.5 h-7 text-[12px] font-medium border-primary/30 bg-primary/5 text-primary rounded-full flex items-center gap-1"
-                  >
-                    {t}
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); toggleTag(t); }}
-                      className="w-4 h-4 rounded-full bg-primary/10 hover:bg-destructive hover:text-white transition-all flex items-center justify-center ml-0.5"
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: '8px' }}>close</span>
-                    </button>
-                  </Badge>
-                ))}
-                <input
-                  ref={inputRef}
-                  type="text"
-                  className="flex-1 bg-transparent border-none outline-none text-sm min-w-[120px] py-0.5"
-                  placeholder={selectedTags.length === 0 ? "Add tags..." : ""}
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                />
-              </div>
-
-              {filteredSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 border border-border rounded-md bg-card shadow-xl z-20 overflow-hidden animate-in fade-in slide-in-from-top-1">
-                  {filteredSuggestions.map(t => (
-                    <div
-                      key={t}
-                      onClick={() => toggleTag(t)}
-                      className="px-3 py-2 text-sm hover:bg-primary/10 hover:text-primary cursor-pointer transition-colors"
-                    >
-                      {t}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {conflictFiles.length > 0 && (
               <div className="bg-destructive/5 border border-destructive/20 p-4 rounded-lg flex flex-col gap-2">

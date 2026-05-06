@@ -331,7 +331,9 @@ class Department(Base):
     source_departments: Mapped[list["SourceDepartment"]] = relationship(
         back_populates="department", cascade="all, delete-orphan"
     )
-    skills: Mapped[list["Skill"]] = relationship(back_populates="department")
+    skill_departments: Mapped[list["SkillDepartment"]] = relationship(
+        back_populates="department", cascade="all, delete-orphan"
+    )
 
 
 class Employee(Base):
@@ -493,38 +495,6 @@ class ProjectSource(Base):
 # AI Skills — Versioned prompt packages and tools
 # ---------------------------------------------------------------------------
 
-skill_tags = sa.Table(
-    "skill_tags",
-    Base.metadata,
-    sa.Column(
-        "skill_id",
-        UUID(as_uuid=True),
-        ForeignKey("skills.id", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-    sa.Column(
-        "tag_id",
-        UUID(as_uuid=True),
-        ForeignKey("tags.id", ondelete="CASCADE"),
-        primary_key=True,
-    ),
-)
-
-
-class Tag(Base):
-    __tablename__ = "tags"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-
-    # Relationships
-    skills: Mapped[list["Skill"]] = relationship(
-        secondary=skill_tags, back_populates="tags"
-    )
-
-
 class Skill(Base):
     """
     An AI Skill package (e.g. 'document-generator').
@@ -538,10 +508,6 @@ class Skill(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     slug: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    department_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"),
-        nullable=True,
-    )
     scope_type: Mapped[str] = mapped_column(
         String(20), default="global",
         comment="Scope type: global, project, department, team",
@@ -566,13 +532,32 @@ class Skill(Base):
     )
 
     # Relationships
-    department: Mapped[Optional["Department"]] = relationship(back_populates="skills")
+    departments: Mapped[list["SkillDepartment"]] = relationship(
+        back_populates="skill", cascade="all, delete-orphan"
+    )
     versions: Mapped[list["SkillVersion"]] = relationship(
         back_populates="skill", cascade="all, delete-orphan"
     )
-    tags: Mapped[list["Tag"]] = relationship(
-        secondary=skill_tags, back_populates="skills"
+
+
+class SkillDepartment(Base):
+    """Many-to-many: Skill ↔ Department.
+    A skill with NO rows here is considered Global (visible to all).
+    """
+    __tablename__ = "skill_departments"
+
+    skill_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE"),
+        primary_key=True,
     )
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # Relationships
+    skill: Mapped["Skill"] = relationship(back_populates="departments")
+    department: Mapped["Department"] = relationship(back_populates="skill_departments")
 
 
 class SkillVersion(Base):
