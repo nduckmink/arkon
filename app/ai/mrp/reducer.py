@@ -435,7 +435,7 @@ Rules:
 - Group closely related small entities onto the same page (max 3-4 per page)
 - priority 1 = highest importance (process first)
 - entity_names must match the names in the entities/concepts lists above
-- Target approximately {target_page_count} total pages
+- Target approximately {target_page_count} total pages (feel free to create more if the document is dense and contains many distinct concepts).
 - Return ONLY the JSON object
 """
 
@@ -452,12 +452,16 @@ async def run_planning_call(
 ) -> dict:
     """Single LLM call to produce the Compilation Plan JSON."""
     n_chars = len(source.full_text or "")
+    # Calculate target based on the actual number of extracted concepts rather than just document length
+    total_extracted_items = len(canonical_entities) + len(canonical_concepts)
+    
     if strategy == "single_pass":
-        target_pages = max(3, min(8, n_chars // 5_000))
+        # Usually 1 page per 2-3 items, minimum 3, maximum 15
+        target_pages = max(3, min(15, total_extracted_items // 2))
     elif strategy == "standard":
-        target_pages = max(8, min(20, n_chars // 8_000))
+        target_pages = max(8, min(30, total_extracted_items // 3))
     else:
-        target_pages = max(15, min(40, n_chars // 10_000))
+        target_pages = max(15, min(60, total_extracted_items // 3))
 
     kt_context = kt_name or "(no specific knowledge type)"
     if kt_desc:
