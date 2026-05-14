@@ -386,10 +386,9 @@ async def get_wiki_graph(
         return await wiki_service.get_neighborhood(db, slug, depth=depth)
 
     # Full graph — paginated, with scope filtering
-    from sqlalchemy import func as sqlfunc
-    from sqlalchemy import outerjoin
+    from sqlalchemy import case, func as sqlfunc
 
-    from app.database.models import Project, WikiLink
+    from app.database.models import Department, Project, WikiLink
 
     base_filter = WikiPage.slug.notin_([wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG])
 
@@ -410,11 +409,15 @@ async def get_wiki_graph(
             WikiPage.page_type,
             WikiPage.scope_type,
             WikiPage.scope_id,
-            Project.name.label("scope_name"),
+            case(
+                (WikiPage.scope_type == "project", Project.name),
+                (WikiPage.scope_type == "department", Department.name),
+                else_=None,
+            ).label("scope_name"),
         )
-        .select_from(
-            outerjoin(WikiPage, Project, WikiPage.scope_id == Project.id)
-        )
+        .select_from(WikiPage)
+        .outerjoin(Project, and_(WikiPage.scope_id == Project.id, WikiPage.scope_type == "project"))
+        .outerjoin(Department, and_(WikiPage.scope_id == Department.id, WikiPage.scope_type == "department"))
         .where(base_filter)
         .order_by(WikiPage.slug)
         .offset(offset)

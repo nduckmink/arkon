@@ -173,13 +173,34 @@ export function WikiGraph({
     // Spread components horizontally so they don't all collide into one blob.
     const margin = dimensions.w * 0.15;
     const usable = Math.max(dimensions.w - 2 * margin, 1);
+
+    // Build stable scope-group index for dept/project nodes.
+    const scopeOrder = new Map<string, number>();
+    for (const n of nodes) {
+      if (n.scope_type === "department" || n.scope_type === "project") {
+        const key = `${n.scope_type}:${n.scope_id || n.scope_name || ""}`;
+        if (!scopeOrder.has(key)) scopeOrder.set(key, scopeOrder.size);
+      }
+    }
+    const totalScopes = scopeOrder.size;
+
     for (const n of nodes) {
       const c = components.get(n.id) ?? 0;
-      // Map component target X around 0
-      n.__targetX =
+      const compX =
         componentTargetX <= 1
           ? 0
           : -usable / 2 + (usable * c) / (componentTargetX - 1);
+
+      if (n.scope_type === "department" || n.scope_type === "project") {
+        const key = `${n.scope_type}:${n.scope_id || n.scope_name || ""}`;
+        const si = scopeOrder.get(key) ?? 0;
+        const scopeX =
+          totalScopes <= 1 ? 0 : -usable / 2 + (usable * si) / (totalScopes - 1);
+        // Bias toward scope cluster (70%) while still respecting component spread (30%).
+        n.__targetX = scopeX * 0.7 + compX * 0.3;
+      } else {
+        n.__targetX = compX;
+      }
     }
 
     fg.d3Force(
@@ -354,27 +375,23 @@ export function WikiGraph({
   const drawScopeHulls = React.useCallback(
     (ctx: CanvasRenderingContext2D) => {
       if (mini) return;
-      // Group project-scoped nodes by scope_name.
-      const groups: Record<string, Node[]> = {};
-      for (const n of nodes) {
-        if (n.scope_type !== "project" || n.x === undefined || n.y === undefined) continue;
-        const key = n.scope_name || "Workspace";
-        (groups[key] ||= []).push(n);
-      }
-      const entries = Object.entries(groups);
-      entries.forEach(([key, gnodes], idx) => {
+
+      const drawGroup = (
+        gnodes: Node[],
+        color: string,
+        dash: number[],
+        alpha: string,
+        label: string,
+      ) => {
         const points: [number, number][] = gnodes.map((n) => [n.x!, n.y!]);
         const hull = convexHull(points);
         if (hull.length === 0) return;
         const padding = 30;
-
-        // Expand hull outward and draw smooth curve via quadratic curves.
         const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
         const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
         const expanded =
           hull.length === 1
-            ? // For single-node groups, draw a circle.
-              null
+            ? null
             : hull.map(([x, y]) => {
                 const dx = x - cx;
                 const dy = y - cy;
@@ -382,13 +399,11 @@ export function WikiGraph({
                 return [x + (dx / len) * padding, y + (dy / len) * padding] as [number, number];
               });
 
-        const color = scopeColor(idx);
-
         ctx.save();
-        ctx.setLineDash([6, 4]);
+        ctx.setLineDash(dash);
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
-        ctx.fillStyle = color + "12"; // ~7% alpha
+        ctx.fillStyle = color + alpha;
         ctx.globalAlpha = 0.85;
 
         ctx.beginPath();
@@ -396,7 +411,6 @@ export function WikiGraph({
           const [x, y] = hull[0];
           ctx.arc(x, y, padding, 0, 2 * Math.PI);
         } else if (expanded.length === 2) {
-          // Stadium shape between two points.
           const [x1, y1] = expanded[0];
           const [x2, y2] = expanded[1];
           ctx.moveTo(x1, y1);
@@ -421,14 +435,36 @@ export function WikiGraph({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Scope label above the hull.
         const topY = Math.min(...points.map((p) => p[1])) - padding - 6;
         ctx.fillStyle = color;
         ctx.font = "600 10px sans-serif";
         ctx.textAlign = "center";
         ctx.globalAlpha = 0.7;
-        ctx.fillText(key, cx, topY);
+        ctx.fillText(label, cx, topY);
         ctx.restore();
+      };
+
+      // Department hulls (drawn first, underneath).
+      const deptGroups: Record<string, Node[]> = {};
+      for (const n of nodes) {
+        if (n.scope_type !== "department" || n.x === undefined || n.y === undefined) continue;
+        const key = n.scope_name || "Department";
+        (deptGroups[key] ||= []).push(n);
+      }
+      Object.entries(deptGroups).forEach(([key, gnodes], idx) => {
+        drawGroup(gnodes, scopeColor(idx), [8, 5], "0e", key);
+      });
+
+      // Project hulls (drawn on top, more prominent).
+      const projGroups: Record<string, Node[]> = {};
+      for (const n of nodes) {
+        if (n.scope_type !== "project" || n.x === undefined || n.y === undefined) continue;
+        const key = n.scope_name || "Workspace";
+        (projGroups[key] ||= []).push(n);
+      }
+      const deptCount = Object.keys(deptGroups).length;
+      Object.entries(projGroups).forEach(([key, gnodes], idx) => {
+        drawGroup(gnodes, scopeColor(deptCount + idx), [6, 4], "1e", key);
       });
     },
     [mini, nodes]
@@ -482,12 +518,26 @@ export function WikiGraph({
   }, [rawNodes]);
 
   const scopeCounts = React.useMemo(() => {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, { count: number; scopeType: string }> = {};
     for (const n of rawNodes) {
-      const label = n.scope_type === "project" ? n.scope_name || "Workspace" : "Global";
-      counts[label] = (counts[label] ?? 0) + 1;
+      let label: string;
+      let scopeType: string;
+      if (n.scope_type === "project") {
+        label = n.scope_name || "Workspace";
+        scopeType = "project";
+      } else if (n.scope_type === "department") {
+        label = n.scope_name || "Department";
+        scopeType = "department";
+      } else {
+        label = "Global";
+        scopeType = "global";
+      }
+      if (!counts[label]) counts[label] = { count: 0, scopeType };
+      counts[label].count++;
     }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return Object.entries(counts)
+      .map(([label, { count, scopeType }]) => ({ label, count, scopeType }))
+      .sort((a, b) => b.count - a.count);
   }, [rawNodes]);
 
   return (
@@ -562,11 +612,17 @@ export function WikiGraph({
           {tooltip.scopeType && (
             <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-border/50 text-muted-foreground">
               <span className="material-symbols-outlined" style={{ fontSize: 11 }}>
-                {tooltip.scopeType === "project" ? "folder_special" : "public"}
+                {tooltip.scopeType === "project"
+                  ? "folder_special"
+                  : tooltip.scopeType === "department"
+                  ? "business"
+                  : "public"}
               </span>
               <span className="truncate">
                 {tooltip.scopeType === "project"
                   ? tooltip.scopeName || "Workspace"
+                  : tooltip.scopeType === "department"
+                  ? tooltip.scopeName || "Department"
                   : "Global"}
               </span>
             </div>
@@ -610,18 +666,22 @@ export function WikiGraph({
                 Scope
               </div>
               <div className="flex flex-col gap-1">
-                {scopeCounts.map(([scope, count]) => (
+                {scopeCounts.map(({ label, count, scopeType }) => (
                   <div
-                    key={scope}
+                    key={label}
                     className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-accent/30 transition-colors"
                   >
                     <span
                       className="material-symbols-outlined text-muted-foreground"
                       style={{ fontSize: 12 }}
                     >
-                      {scope === "Global" ? "public" : "folder_special"}
+                      {scopeType === "project"
+                        ? "folder_special"
+                        : scopeType === "department"
+                        ? "business"
+                        : "public"}
                     </span>
-                    <span className="text-muted-foreground truncate">{scope}</span>
+                    <span className="text-muted-foreground truncate">{label}</span>
                     <span className="text-muted-foreground/60 ml-auto tabular-nums">{count}</span>
                   </div>
                 ))}
