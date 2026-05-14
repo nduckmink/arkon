@@ -124,19 +124,8 @@ async def analyze_source(
             temperature=0.1,
         )
 
-        # Strip markdown code fences if the LLM wrapped the JSON
-        cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-
-        # If JSON was truncated, trim to last valid closing brace
-        try:
-            result = json.loads(cleaned)
-        except json.JSONDecodeError:
-            last_brace = cleaned.rfind("}")
-            if last_brace != -1:
-                result = json.loads(cleaned[: last_brace + 1])
-            else:
-                raise
+        from app.utils.text import parse_json_loose
+        result = parse_json_loose(raw)
         logger.debug(f"WikiAnalyzer: analysis complete for '{source_title}'")
         return result
 

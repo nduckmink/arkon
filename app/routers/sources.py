@@ -576,7 +576,6 @@ async def retry_source(
 
 class PlanApproveRequest(BaseModel):
     note: Optional[str] = None
-    modified_plan: Optional[dict] = None
 
 
 class PlanRejectRequest(BaseModel):
@@ -606,6 +605,7 @@ async def get_compilation_plan(
     plan_json.pop("_claims", None)
     plan_json.pop("_entities", None)
     plan_json.pop("_concepts", None)
+    plan_json.pop("_page_drafts", None)
 
     return {
         "id": str(plan.id),
@@ -631,26 +631,28 @@ async def approve_compilation_plan(
     from app.database.models import SourceCompilationPlan
 
     plan = (await db.execute(
-        select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == source_id)
+        select(SourceCompilationPlan)
+        .where(SourceCompilationPlan.source_id == source_id)
+        .with_for_update()
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
+    if plan.status == "regenerating":
+        raise HTTPException(
+            status_code=409,
+            detail="Plan is being regenerated. Wait for it to finish before approving.",
+        )
     if plan.status != "pending_review":
         raise HTTPException(
             status_code=400,
             detail=f"Plan is not pending review (status={plan.status})",
         )
 
-    if body.modified_plan:
-        # Preserve internal keys from original plan
-        internal_keys = {k: plan.plan_json[k] for k in ("_claims", "_entities", "_concepts") if k in plan.plan_json}
-        merged = {**body.modified_plan, **internal_keys}
-        plan.plan_json = merged
-
     plan.status = "approved"
     plan.reviewed_by = user.id
     plan.review_note = body.note
     plan.reviewed_at = datetime.now(timezone.utc)
+    await log_audit(db, user, "approve", "compilation_plan", str(plan.id), reason=body.note or None)
 
     source = await db.get(Source, source_id)
     if source:
@@ -678,19 +680,23 @@ async def regenerate_compilation_plan(
     db: AsyncSession = Depends(get_db),
     user: Employee = require_permission("doc:edit"),
 ):
-    """Re-run the planning phase using reviewer feedback and return the updated plan."""
-    from app.ai.mrp.reducer import reconcile_with_kb, run_planning_call
-    from app.ai.registry import ProviderRegistry
-    from app.database.models import Source, SourceCompilationPlan
+    """
+    Enqueue a background task to re-run planning with reviewer feedback.
 
-    source = (await db.execute(
-        select(Source).options(*_source_load_options()).where(Source.id == source_id)
-    )).scalar_one_or_none()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+    Plan status transitions: pending_review/rejected → regenerating → pending_review.
+    Frontend should poll GET /sources/{id}/plan to detect completion (status flips
+    back to pending_review and plan content updates).
+    """
+    from app.database.models import SourceCompilationPlan
 
+    if not body.note.strip():
+        raise HTTPException(status_code=400, detail="Note is required to regenerate plan")
+
+    # SELECT FOR UPDATE — atomic state transition, prevents concurrent regenerate/approve.
     plan = (await db.execute(
-        select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == source_id)
+        select(SourceCompilationPlan)
+        .where(SourceCompilationPlan.source_id == source_id)
+        .with_for_update()
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
@@ -700,73 +706,19 @@ async def regenerate_compilation_plan(
             detail=f"Plan cannot be regenerated (status={plan.status})",
         )
 
-    plan_json = plan.plan_json or {}
-    canonical_entities = plan_json.get("_entities", [])
-    canonical_concepts = plan_json.get("_concepts", [])
-
-    registry = ProviderRegistry(db)
-    try:
-        llm = await registry.get_llm()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"LLM provider unavailable: {exc}")
-
-    embedding_provider = None
-    try:
-        embedding_provider = await registry.get_embedding(task="document")
-    except Exception:
-        pass
-
-    # Re-run KB reconciliation
-    reconciliation: dict = {}
-    if embedding_provider and (canonical_entities or canonical_concepts):
-        try:
-            reconciliation = await reconcile_with_kb(
-                db, canonical_entities, canonical_concepts, embedding_provider, source, llm=llm,
-            )
-        except Exception as exc:
-            logger.warning(f"Plan regenerate: KB reconciliation failed: {exc}")
-
-    # Re-run planning call with user note
-    kt_name = source.knowledge_type.name if source.knowledge_type else None
-    kt_desc = None
-
-    strategy = source.pipeline_strategy or "standard"
-    try:
-        new_plan_dict = await run_planning_call(
-            llm=llm,
-            source=source,
-            strategy=strategy,
-            canonical_entities=canonical_entities,
-            canonical_concepts=canonical_concepts,
-            reconciliation=reconciliation,
-            kt_name=kt_name,
-            kt_desc=kt_desc,
-            user_note=body.note,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Planning call failed: {exc}")
-
-    # Preserve internal keys and save
-    internal_keys = {k: plan_json[k] for k in ("_claims", "_entities", "_concepts") if k in plan_json}
-    new_plan_dict.update(internal_keys)
-
-    plan.plan_json = new_plan_dict
-    plan.status = "pending_review"
-    plan.reviewed_by = None
-    plan.review_note = None
-    plan.reviewed_at = None
+    plan.status = "regenerating"
+    plan.review_note = body.note[:1000]
+    await log_audit(db, user, "regenerate", "compilation_plan", str(plan.id), reason=body.note[:200])
     await db.commit()
 
-    # Return updated plan (strip internal keys)
-    clean = dict(new_plan_dict)
-    clean.pop("_claims", None)
-    clean.pop("_entities", None)
-    clean.pop("_concepts", None)
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("regenerate_plan_task", str(source_id), body.note)
+
+    logger.info(f"Plan regenerate queued for source {source_id} by user {user.id}, job: {job.job_id if job else 'N/A'}")
     return {
-        "id": str(plan.id),
+        "queued": True,
         "status": plan.status,
-        "plan": clean,
-        "review_note": None,
+        "job_id": job.job_id if job else None,
     }
 
 
@@ -783,10 +735,17 @@ async def reject_compilation_plan(
     from app.database.models import SourceCompilationPlan
 
     plan = (await db.execute(
-        select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == source_id)
+        select(SourceCompilationPlan)
+        .where(SourceCompilationPlan.source_id == source_id)
+        .with_for_update()
     )).scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=404, detail="No plan found for this source")
+    if plan.status == "regenerating":
+        raise HTTPException(
+            status_code=409,
+            detail="Plan is being regenerated. Wait for it to finish before rejecting.",
+        )
     if plan.status != "pending_review":
         raise HTTPException(
             status_code=400,
@@ -797,6 +756,7 @@ async def reject_compilation_plan(
     plan.reviewed_by = user.id
     plan.review_note = body.note
     plan.reviewed_at = datetime.now(timezone.utc)
+    await log_audit(db, user, "reject", "compilation_plan", str(plan.id), reason=body.note)
 
     source = await db.get(Source, source_id)
     if source:

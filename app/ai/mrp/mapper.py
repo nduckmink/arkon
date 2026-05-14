@@ -303,15 +303,8 @@ def _build_extraction_prompt(chunk: DocumentChunk) -> str:
 
 def _parse_extract_json(raw: str) -> dict:
     """Parse LLM response to extraction dict. Raises ValueError on failure."""
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        last_brace = cleaned.rfind("}")
-        if last_brace != -1:
-            return json.loads(cleaned[: last_brace + 1])
-        raise
+    from app.utils.text import parse_json_loose
+    return parse_json_loose(raw)
 
 
 def _convert_offsets(extract: dict, chunk: DocumentChunk) -> dict:

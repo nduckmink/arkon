@@ -452,25 +452,31 @@ async def run_refine_pipeline(
             src.pipeline_phase = "verify"
         await session.commit()
     else:
-        logger.info(f"MRP: source={source_id} resuming at {current_phase} phase — skipping REFINE")
-        # On resume from 'verify' or 'commit' we can't recover page_results from DB
-        # (they're in-memory only). We must re-run REFINE from the plan.
-        src = await session.get(Source, source_id)
-        if src:
-            src.pipeline_phase = "refine"
-        await session.commit()
+        logger.info(f"MRP: source={source_id} resuming at {current_phase} phase — loading persisted drafts")
+        drafts = (plan.plan_json or {}).get("_page_drafts") or []
+        if drafts:
+            page_results = [PageWriteResult.from_dict(d) for d in drafts]
+            logger.info(f"MRP: loaded {len(page_results)} persisted page drafts for source={source_id}")
+        else:
+            logger.warning(
+                f"MRP: source={source_id} at {current_phase} phase but no drafts persisted — re-running REFINE"
+            )
+            src = await session.get(Source, source_id)
+            if src:
+                src.pipeline_phase = "refine"
+            await session.commit()
 
-        page_results = await run_refine_phase(
-            session=session,
-            source=source,
-            plan=plan,
-            chunk_extracts=chunk_extracts,
-            full_text=full_text,
-            llm=llm,
-            embedding_provider=embedding_provider,
-            kt_slug=kt_slug,
-            tracker=tracker,
-        )
+            page_results = await run_refine_phase(
+                session=session,
+                source=source,
+                plan=plan,
+                chunk_extracts=chunk_extracts,
+                full_text=full_text,
+                llm=llm,
+                embedding_provider=embedding_provider,
+                kt_slug=kt_slug,
+                tracker=tracker,
+            )
 
         src = await session.get(Source, source_id)
         if src:

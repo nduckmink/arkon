@@ -47,24 +47,41 @@ export function PlanReviewDialog({
   onDone: () => void;
 }) {
   const [plan, setPlan] = React.useState<PlanData | null>(null);
+  const [planStatus, setPlanStatus] = React.useState<string>("pending_review");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState<"approve" | "reject" | "regenerate" | null>(null);
   const [reviewNote, setReviewNote] = React.useState("");
   const [confirmReject, setConfirmReject] = React.useState(false);
 
-  const loadPlan = React.useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api<PlanResponse>(`/api/sources/${source.id}/plan`)
-      .then((res) => setPlan(res.plan))
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load plan"))
-      .finally(() => setLoading(false));
+  const loadPlan = React.useCallback(async () => {
+    try {
+      const res = await api<PlanResponse>(`/api/sources/${source.id}/plan`);
+      setPlan(res.plan);
+      setPlanStatus(res.status);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load plan");
+    } finally {
+      setLoading(false);
+    }
   }, [source.id]);
 
   React.useEffect(() => {
-    loadPlan();
+    setLoading(true);
+    void loadPlan();
   }, [loadPlan]);
+
+  // Poll while the plan is being regenerated in the background.
+  React.useEffect(() => {
+    if (planStatus !== "regenerating") return;
+    const id = setInterval(() => {
+      void loadPlan();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [planStatus, loadPlan]);
+
+  const isRegenerating = planStatus === "regenerating" || submitting === "regenerate";
 
   const handleApprove = async () => {
     setSubmitting("approve");
@@ -108,11 +125,12 @@ export function PlanReviewDialog({
     setSubmitting("regenerate");
     setError(null);
     try {
-      const res = await api<PlanResponse>(`/api/sources/${source.id}/plan/regenerate`, {
+      await api(`/api/sources/${source.id}/plan/regenerate`, {
         method: "POST",
         body: { note: reviewNote },
       });
-      setPlan(res.plan);
+      // Background task — flip local status so the polling effect kicks in.
+      setPlanStatus("regenerating");
       setReviewNote("");
       setConfirmReject(false);
     } catch (e) {
@@ -156,8 +174,17 @@ export function PlanReviewDialog({
             </div>
           )}
 
+          {isRegenerating && (
+            <div className="flex items-center gap-2 text-sm bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/30 px-3 py-2 rounded-lg mb-4">
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: 18 }}>
+                progress_activity
+              </span>
+              Regenerating plan with your feedback… this can take 30–90 seconds.
+            </div>
+          )}
+
           {plan && (
-            <div className="flex flex-col gap-4">
+            <div className={`flex flex-col gap-4 ${isRegenerating ? "opacity-50 pointer-events-none" : ""}`}>
               {/* Summary row */}
               <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
                 <span className="flex items-center gap-1.5">
@@ -230,12 +257,22 @@ export function PlanReviewDialog({
             value={reviewNote}
             onChange={(e) => setReviewNote(e.target.value)}
             placeholder="Feedback or correction for the AI (e.g. 'Page X already exists, it should be UPDATE not CREATE'). Required to regenerate."
-            className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+            disabled={isRegenerating}
+            className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 disabled:opacity-60"
           />
           <p className="text-[11px] text-muted-foreground">
             Write feedback then click <strong>Regenerate</strong> to have AI redo the plan, or click <strong>Approve</strong> to proceed as-is.
           </p>
         </div>
+
+        {isRegenerating && (
+          <div className="mt-2 flex items-center gap-2 text-sm text-blue-600 bg-blue-500/10 rounded-lg px-3 py-2 shrink-0">
+            <span className="material-symbols-outlined animate-spin" style={{ fontSize: 18 }}>
+              progress_activity
+            </span>
+            Regenerating plan with your feedback — this can take up to a minute.
+          </div>
+        )}
 
         <div className="flex items-center justify-between mt-4 pt-4 border-t border-border shrink-0">
           <div className="flex items-center gap-2">
@@ -243,17 +280,17 @@ export function PlanReviewDialog({
               variant="outline"
               size="sm"
               onClick={handleRegenerate}
-              disabled={loading || submitting !== null}
+              disabled={loading || submitting !== null || isRegenerating}
               className="gap-1.5"
             >
-              {submitting === "regenerate" ? (
+              {isRegenerating ? (
                 <span className="material-symbols-outlined animate-spin" style={{ fontSize: 15 }}>
                   progress_activity
                 </span>
               ) : (
                 <span className="material-symbols-outlined" style={{ fontSize: 15 }}>refresh</span>
               )}
-              Regenerate
+              {isRegenerating ? "Regenerating..." : "Regenerate"}
             </Button>
           </div>
 
@@ -269,7 +306,7 @@ export function PlanReviewDialog({
               <Button
                 variant="outline"
                 onClick={() => setConfirmReject(true)}
-                disabled={loading || submitting !== null}
+                disabled={loading || submitting !== null || isRegenerating}
                 className="text-destructive border-destructive/30 hover:bg-destructive/10"
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
@@ -293,7 +330,7 @@ export function PlanReviewDialog({
             )}
             <Button
               onClick={handleApprove}
-              disabled={loading || submitting !== null}
+              disabled={loading || submitting !== null || isRegenerating}
             >
               {submitting === "approve" ? (
                 <span className="material-symbols-outlined animate-spin" style={{ fontSize: 16 }}>

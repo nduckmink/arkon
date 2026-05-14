@@ -266,8 +266,8 @@ async def resolve_ambiguous_entities(
             llm.generate(prompt, system="You are a named-entity resolution assistant. Return only JSON.", temperature=0.0),
             timeout=60,
         )
-        cleaned = raw.strip().strip("```json").strip("```").strip()
-        decisions: list[bool] = json.loads(cleaned)
+        from app.utils.text import parse_json_loose
+        decisions: list[bool] = parse_json_loose(raw)
         for k, (i, j) in enumerate(ambiguous_pairs):
             if k < len(decisions) and decisions[k]:
                 ri, rj = _root(i), _root(j)
@@ -323,8 +323,6 @@ async def reconcile_with_kb(
 
     from app.ai.mrp.pipeline import _resolve_wiki_scopes
     wiki_scopes = await _resolve_wiki_scopes(session, source)
-    # Use the primary scope for KB reconciliation; commit phase handles per-scope fallbacks.
-    scope_type, scope_id = wiki_scopes[0]
 
     all_items = [("entity", e["name"], e) for e in entities] + \
                 [("concept", c["term"], c) for c in concepts]
@@ -347,20 +345,29 @@ async def reconcile_with_kb(
         return {name: {"action": "CREATE", "page_slug": None, "similarity": 0.0} for _, name, _ in all_items}
 
     for (_, name, _), vec in zip(all_items, vectors):
-        try:
-            hits = await wiki_service.search_pages_semantic(
-                session, vec, top_k=3, scope_type=scope_type, scope_id=scope_id,
-            )
-        except Exception as exc:
-            logger.debug(f"MRP REDUCE kb reconcile failed for '{name}': {exc}")
+        # Search across ALL scopes the source belongs to and keep the best hit.
+        # Prevents creating duplicate pages when an entity exists in one of the
+        # destination scopes but the search only checks another.
+        best_hit: Optional[tuple] = None
+        for scope_type, scope_id in wiki_scopes:
+            try:
+                hits = await wiki_service.search_pages_semantic(
+                    session, vec, top_k=3, scope_type=scope_type, scope_id=scope_id,
+                )
+            except Exception as exc:
+                logger.debug(f"MRP REDUCE kb reconcile failed for '{name}' scope={scope_type}: {exc}")
+                continue
+            if not hits:
+                continue
+            page, sim = hits[0]
+            if best_hit is None or sim > best_hit[1]:
+                best_hit = (page, sim)
+
+        if best_hit is None:
             reconciliation[name] = {"action": "CREATE", "page_slug": None, "similarity": 0.0}
             continue
 
-        if not hits:
-            reconciliation[name] = {"action": "CREATE", "page_slug": None, "similarity": 0.0}
-            continue
-
-        top_page, top_sim = hits[0]
+        top_page, top_sim = best_hit
         if top_sim >= KB_UPDATE_THRESHOLD:
             reconciliation[name] = {"action": "UPDATE", "page_slug": top_page.slug, "similarity": top_sim}
         elif top_sim >= KB_MAYBE_THRESHOLD:
@@ -415,8 +422,8 @@ async def _resolve_maybe_items(
             ),
             timeout=30,
         )
-        cleaned = raw.strip().strip("```json").strip("```").strip()
-        decisions: list[bool] = json.loads(cleaned)
+        from app.utils.text import parse_json_loose
+        decisions: list[bool] = parse_json_loose(raw)
         for k, (name, rec) in enumerate(maybe_items):
             if k < len(decisions) and decisions[k]:
                 reconciliation[name]["action"] = "UPDATE"
@@ -564,18 +571,8 @@ async def run_planning_call(
         timeout=120,
     )
 
-    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        plan = json.loads(cleaned)
-    except json.JSONDecodeError:
-        last_brace = cleaned.rfind("}")
-        if last_brace != -1:
-            plan = json.loads(cleaned[: last_brace + 1])
-        else:
-            raise
-
-    return plan
+    from app.utils.text import parse_json_loose
+    return parse_json_loose(raw)
 
 
 # ---------------------------------------------------------------------------

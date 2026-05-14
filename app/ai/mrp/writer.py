@@ -14,6 +14,7 @@ All writers run in parallel (asyncio.Semaphore(MAX_WRITER_CONCURRENCY)).
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -53,6 +54,33 @@ class PageWriteResult:
     entity_names: list[str] = field(default_factory=list)
     related_kb_pages: list[str] = field(default_factory=list)
 
+    def to_dict(self) -> dict:
+        return {
+            "slug": self.slug,
+            "title": self.title,
+            "page_type": self.page_type,
+            "action": self.action,
+            "content_md": self.content_md,
+            "summary": self.summary,
+            "citations": self.citations,
+            "entity_names": self.entity_names,
+            "related_kb_pages": self.related_kb_pages,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PageWriteResult":
+        return cls(
+            slug=d.get("slug", ""),
+            title=d.get("title", ""),
+            page_type=d.get("page_type", "concept"),
+            action=d.get("action", "CREATE"),
+            content_md=d.get("content_md", ""),
+            summary=d.get("summary", ""),
+            citations=d.get("citations", []),
+            entity_names=d.get("entity_names", []),
+            related_kb_pages=d.get("related_kb_pages", []),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Evidence assembly
@@ -65,24 +93,47 @@ def assemble_evidence(
 ) -> list[dict]:
     """
     Collect all claims whose subject matches any entity_name in the plan item.
-    Attaches source_excerpt (up to 500 chars) from full_text for each claim.
+    Matches use whole-word/whole-phrase comparison (case-insensitive) so short
+    names like "AI" don't accidentally match "AIRPLANE" or "MAIL".
     """
-    entity_names_lower = {n.lower() for n in plan_item.get("entity_names", [])}
+    import re
+
+    entity_names_lower = [n.lower().strip() for n in plan_item.get("entity_names", []) if n and n.strip()]
+    if not entity_names_lower:
+        return []
+
+    # Pre-compile a word-boundary pattern per entity name. We escape the name so
+    # punctuation in the name is treated literally.
+    patterns = [re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE) for name in entity_names_lower]
+
     evidence = []
     for claim in claims:
-        subj = (claim.get("subject") or "").lower()
-        if subj in entity_names_lower or any(name in subj for name in entity_names_lower):
-            offset = claim.get("absolute_offset", 0)
-            length = min(claim.get("evidence_length", 200), 500)
-            excerpt = full_text[offset: offset + length] if full_text else ""
-            evidence.append({
-                "statement": claim.get("statement", ""),
-                "subject": claim.get("subject", ""),
-                "confidence": claim.get("confidence", "explicit"),
-                "source_excerpt": excerpt,
-                "absolute_offset": offset,
-                "evidence_length": length,
-            })
+        subj_raw = (claim.get("subject") or "").strip()
+        if not subj_raw:
+            continue
+        subj_lower = subj_raw.lower()
+
+        # Exact match (after normalization) — the strongest signal.
+        if subj_lower in entity_names_lower:
+            matched = True
+        else:
+            # Word-boundary match for multi-word subjects like "Acme Corp's CEO"
+            matched = any(p.search(subj_raw) for p in patterns)
+
+        if not matched:
+            continue
+
+        offset = claim.get("absolute_offset", 0)
+        length = min(claim.get("evidence_length", 200), 500)
+        excerpt = full_text[offset: offset + length] if full_text else ""
+        evidence.append({
+            "statement": claim.get("statement", ""),
+            "subject": claim.get("subject", ""),
+            "confidence": claim.get("confidence", "explicit"),
+            "source_excerpt": excerpt,
+            "absolute_offset": offset,
+            "evidence_length": length,
+        })
     return evidence
 
 
@@ -421,7 +472,7 @@ Use them as a checklist — make sure you don't miss any of these facts.
 But also look for additional relevant information in the source text above.
 
 {evidence_blocks}
-
+{image_section}
 ## Instructions
 Write the complete wiki page in markdown based on the source text above.
 Cross-link to other pages using [[slug]] or [[slug|display text]] — ONLY
@@ -443,6 +494,35 @@ def _format_evidence_blocks(evidence: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(lines), []
 
 
+_IMAGE_MARKER_RE = re.compile(r"!\[([^\]]*)\]\(image://([0-9a-fA-F-]+)\)")
+
+
+def _collect_relevant_image_markers(
+    evidence: list[dict],
+    full_text: str,
+    window: int = 1500,
+) -> list[str]:
+    """
+    Find image markers near this page's evidence offsets. Markers in source text
+    are emitted with their captions; writer is told to place them where relevant.
+    Returns unique markers preserving first-seen order.
+    """
+    if not full_text:
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for ev in evidence:
+        off = ev.get("absolute_offset", 0)
+        start = max(0, off - window)
+        end = min(len(full_text), off + ev.get("evidence_length", 200) + window)
+        for m in _IMAGE_MARKER_RE.finditer(full_text, start, end):
+            marker = m.group(0)
+            if marker not in seen:
+                seen.add(marker)
+                ordered.append(marker)
+    return ordered
+
+
 async def _write_page_simple(
     llm: LLMProvider,
     plan_item: dict,
@@ -450,6 +530,7 @@ async def _write_page_simple(
     existing_content: Optional[str],
     all_plan_slugs: list[str],
     source_context: str = "",
+    image_markers: Optional[list[str]] = None,
 ) -> tuple[str, str, list[dict]]:
     """
     Returns (content_md, summary, citations_meta).
@@ -465,6 +546,17 @@ async def _write_page_simple(
     )
     evidence_blocks, citations_meta = _format_evidence_blocks(evidence)
 
+    image_section = ""
+    if image_markers:
+        image_section = (
+            "\n## Images near this page's evidence\n"
+            "The following image markers appear near the evidence for this page. "
+            "Embed each marker VERBATIM in the most contextually appropriate section, "
+            "or omit if not relevant. Do NOT invent image UUIDs.\n\n"
+            + "\n".join(f"- {m}" for m in image_markers)
+            + "\n"
+        )
+
     prompt = _SIMPLE_WRITER_PROMPT.format(
         action=plan_item.get("action", "CREATE"),
         slug=plan_item.get("slug", ""),
@@ -475,6 +567,7 @@ async def _write_page_simple(
         source_context=source_context or "(no source text available)",
         evidence_count=len(evidence),
         evidence_blocks=evidence_blocks or "(no pre-extracted evidence)",
+        image_section=image_section,
     )
 
     raw = await asyncio.wait_for(
@@ -590,6 +683,17 @@ async def _write_page_complex(
     # Build source context
     source_context = _build_source_context(full_text, evidence, model_id=llm.config.model_id)
 
+    image_markers = _collect_relevant_image_markers(evidence, full_text)
+    image_section = ""
+    if image_markers:
+        image_section = (
+            "\n## Images near this page's evidence\n"
+            "Embed each marker VERBATIM where contextually appropriate, or omit "
+            "if not relevant. Do NOT invent image UUIDs.\n"
+            + "\n".join(f"- {m}" for m in image_markers)
+            + "\n"
+        )
+
     initial_msg = (
         f"Write a wiki page for: **{plan_item.get('title', '')}** "
         f"(slug: `{own_slug}`, type: {plan_item.get('page_type', 'concept')})\n"
@@ -598,6 +702,7 @@ async def _write_page_complex(
         f"{existing_section}\n"
         f"## Source document text\n{source_context}\n\n"
         f"## Evidence checklist ({len(evidence)} items)\n{evidence_blocks}"
+        f"{image_section}"
     )
 
     messages = [{"role": "user", "content": initial_msg}]
@@ -749,6 +854,7 @@ async def run_refine_phase(
 
             # Build source context for the writer
             source_context = _build_source_context(full_text, evidence, model_id=llm.config.model_id)
+            image_markers = _collect_relevant_image_markers(evidence, full_text)
 
             try:
                 if is_complex:
@@ -761,6 +867,7 @@ async def run_refine_phase(
                         llm, plan_item, evidence, existing_content,
                         all_plan_slugs=all_plan_slugs,
                         source_context=source_context,
+                        image_markers=image_markers,
                     )
             except Exception as e:
                 err_msg = f"{type(e).__name__}: {str(e)}"
@@ -784,6 +891,15 @@ async def run_refine_phase(
 
     results = await asyncio.gather(*[_write_one(p) for p in pages_spec])
     page_results = [r for r in results if r is not None]
+
+    # Persist drafts into plan_json so VERIFY/COMMIT can resume without re-running REFINE.
+    try:
+        plan_json = dict(plan.plan_json or {})
+        plan_json["_page_drafts"] = [pr.to_dict() for pr in page_results]
+        plan.plan_json = plan_json
+        await session.commit()
+    except Exception as exc:
+        logger.warning(f"MRP REFINE failed to persist page drafts: {exc}")
 
     logger.info(f"MRP REFINE complete: {len(page_results)} pages written for source={source.id}")
     return page_results

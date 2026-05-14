@@ -148,21 +148,25 @@ async def ingest_file_task(ctx: dict, source_id: str):
                 if kt:
                     kt_slug, kt_name, kt_desc = kt.slug, kt.name, kt.description
 
-            # --- Step 6: Enqueue MRP pipeline + image captioning in parallel ---
+            # --- Step 6: Enqueue captioning (if images) OR MRP directly ---
+            # Captioning MUST complete before MAP so wiki pages get real image captions
+            # baked into full_text. caption_images_task chains into ingest_map_reduce_task
+            # itself when it finishes.
             await tracker.update(55, "Queuing compilation pipeline...")
             pool = await get_arq_pool()
-            job, _ = await asyncio.gather(
-                pool.enqueue_job("ingest_map_reduce_task", source_id),
-                pool.enqueue_job("caption_images_task", source_id) if images else asyncio.sleep(0),
-            )
+            if images:
+                job = await pool.enqueue_job("caption_images_task", source_id)
+                source.progress_message = f"Captioning {len(images)} images before extraction..."
+            else:
+                job = await pool.enqueue_job("ingest_map_reduce_task", source_id)
+                source.progress_message = "Extraction queued..."
             source.status = "processing"
             source.progress = 55
-            source.progress_message = "Extraction queued..."
             if job:
                 source.job_id = job.job_id
             await session.commit()
 
-            logger.info(f"Source {source_id} pre-processing done, MRP + caption tasks enqueued")
+            logger.info(f"Source {source_id} pre-processing done; next: {'caption→MRP' if images else 'MRP'}")
             return {"status": "processing", "images": len(images)}
 
         except BaseException as e:
@@ -794,6 +798,98 @@ async def ingest_refine_task(ctx: dict, source_id: str):
             raise
 
 
+async def regenerate_plan_task(ctx: dict, source_id: str, user_note: str):
+    """
+    arq task: re-run KB reconciliation + planning call with reviewer feedback.
+
+    Toggles plan.status: pending_review/rejected → regenerating → pending_review.
+    Frontend polls GET /sources/{id}/plan to observe completion.
+    """
+    from app.ai.mrp.reducer import reconcile_with_kb, run_planning_call
+    from app.ai.registry import ProviderRegistry
+    from app.database import async_session_factory
+    from app.database.models import KnowledgeType, Source, SourceCompilationPlan
+
+    sid = uuid.UUID(source_id)
+
+    async with async_session_factory() as session:
+        from sqlalchemy.orm import selectinload
+        source = (await session.execute(
+            select(Source)
+            .options(selectinload(Source.knowledge_type))
+            .where(Source.id == sid)
+        )).scalar_one_or_none()
+        if not source:
+            logger.warning(f"regenerate_plan_task: source {source_id} not found")
+            return
+
+        plan = (await session.execute(
+            select(SourceCompilationPlan).where(SourceCompilationPlan.source_id == sid)
+        )).scalar_one_or_none()
+        if not plan:
+            logger.warning(f"regenerate_plan_task: no plan for source {source_id}")
+            return
+
+        plan_json = plan.plan_json or {}
+        canonical_entities = plan_json.get("_entities", [])
+        canonical_concepts = plan_json.get("_concepts", [])
+
+        try:
+            registry = ProviderRegistry(session)
+            llm = await registry.get_llm()
+            embedding_provider = None
+            try:
+                embedding_provider = await registry.get_embedding(task="document")
+            except Exception:
+                pass
+
+            reconciliation: dict = {}
+            if embedding_provider and (canonical_entities or canonical_concepts):
+                try:
+                    reconciliation = await reconcile_with_kb(
+                        session, canonical_entities, canonical_concepts, embedding_provider, source, llm=llm,
+                    )
+                except Exception as exc:
+                    logger.warning(f"regenerate_plan_task: KB reconcile failed: {exc}")
+
+            kt_name = source.knowledge_type.name if source.knowledge_type else None
+            kt_desc = source.knowledge_type.description if source.knowledge_type else None
+            strategy = source.pipeline_strategy or "standard"
+
+            new_plan_dict = await run_planning_call(
+                llm=llm,
+                source=source,
+                strategy=strategy,
+                canonical_entities=canonical_entities,
+                canonical_concepts=canonical_concepts,
+                reconciliation=reconciliation,
+                kt_name=kt_name,
+                kt_desc=kt_desc,
+                user_note=user_note,
+            )
+
+            internal_keys = {
+                k: plan_json[k] for k in ("_claims", "_entities", "_concepts") if k in plan_json
+            }
+            new_plan_dict.update(internal_keys)
+
+            plan.plan_json = new_plan_dict
+            plan.status = "pending_review"
+            plan.reviewed_by = None
+            plan.review_note = None
+            plan.reviewed_at = None
+            await session.commit()
+            logger.success(f"regenerate_plan_task: plan refreshed for source {source_id}")
+        except Exception as exc:
+            logger.exception(f"regenerate_plan_task failed for {source_id}: {exc}")
+            # Restore plan to pending_review so user isn't stuck on 'regenerating'
+            plan2 = await session.get(SourceCompilationPlan, plan.id)
+            if plan2 and plan2.status == "regenerating":
+                plan2.status = "pending_review"
+                plan2.review_note = f"Regeneration failed: {str(exc)[:200]}"
+                await session.commit()
+
+
 async def caption_images_task(ctx: dict, source_id: str):
     """
     arq task: vision-caption all SourceImage rows for a source.
@@ -876,6 +972,43 @@ async def caption_images_task(ctx: dict, source_id: str):
     ])
     logger.success(f"caption_images_task: {total} images processed for {source_id}")
 
+    # Bake captions into source.full_text so MAP-phase LLM sees ![<caption>](image://uuid)
+    # instead of the empty ![](image://uuid) marker, then chain into MRP.
+    import re
+
+    async with async_session_factory() as session:
+        source = await session.get(Source, sid)
+        if not source:
+            return
+        rows = (await session.execute(
+            select(SourceImage).where(SourceImage.source_id == sid)
+        )).scalars().all()
+        caption_by_id = {str(r.id): (r.caption or "").replace("\n", " ").strip() for r in rows}
+
+        if source.full_text and caption_by_id:
+            def _sub(match: re.Match) -> str:
+                uid = match.group(1)
+                cap = caption_by_id.get(uid, "")
+                return f"![{cap}](image://{uid})"
+            # Replace any marker (empty or already-captioned) so re-runs are idempotent.
+            new_text = re.sub(r"!\[[^\]]*\]\(image://([0-9a-fA-F-]+)\)", _sub, source.full_text)
+            if new_text != source.full_text:
+                source.full_text = new_text
+                await session.commit()
+                logger.info(f"caption_images_task: refreshed full_text with {len(caption_by_id)} captions for {source_id}")
+
+    # Chain into MAP-REDUCE (only now that captions are baked in).
+    pool = await get_arq_pool()
+    job = await pool.enqueue_job("ingest_map_reduce_task", source_id)
+    if job:
+        async with async_session_factory() as session:
+            source = await session.get(Source, sid)
+            if source:
+                source.job_id = job.job_id
+                source.progress_message = "Extraction queued..."
+                await session.commit()
+    logger.info(f"caption_images_task: enqueued ingest_map_reduce_task for {source_id}")
+
 
 class WorkerSettings:
     """arq worker configuration."""
@@ -886,6 +1019,7 @@ class WorkerSettings:
         arq_func(caption_images_task, timeout=3600),
         ingest_map_reduce_task,
         ingest_refine_task,
+        regenerate_plan_task,
         reembed_all_pages_task,
     ]
     redis_settings = _get_redis_settings()

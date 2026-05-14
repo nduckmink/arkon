@@ -120,8 +120,8 @@ async def check_conflicts(
                     llm.generate(prompt, system="You are a fact-checking assistant. Return only JSON.", temperature=0.0),
                     timeout=30,
                 )
-                cleaned = raw.strip().strip("```json").strip("```").strip()
-                result = json.loads(cleaned)
+                from app.utils.text import parse_json_loose
+                result = parse_json_loose(raw)
                 if result.get("contradicts"):
                     desc = result.get("description", "")
                     conflicts.append({
