@@ -82,6 +82,7 @@ services:
 
   api:
     <<: *backend
+    container_name: arkon_api
     depends_on:
       migrator:
         condition: service_completed_successfully
@@ -91,8 +92,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-    <<: *backend
-    container_name: arkon_api
     ports:
       - "5055:5055"
     command: python -m uvicorn app.main:app --host 0.0.0.0 --port 5055
