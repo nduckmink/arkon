@@ -469,14 +469,27 @@ async def list_orphaned_wiki_pages(
 @router.delete("/wiki/pages/{slug:path}")
 async def delete_wiki_page(
     slug: str,
+    scope_type: Optional[str] = Query(None),
+    scope_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user: Employee = require_permission("wiki:delete"),
 ):
-    """Delete a wiki page and cascade-cleanup all references."""
+    """Delete a wiki page and cascade-cleanup all references.
+
+    Same scope-resolution rules as `get_wiki_page`: caller may pass
+    `scope_type` + `scope_id` to target a specific scoped page; otherwise we
+    try global first and fall back to any scope.
+    """
     if slug in (wiki_service.INDEX_SLUG, wiki_service.LOG_SLUG):
         raise HTTPException(400, "Cannot delete reserved pages")
 
-    page = await wiki_service.get_page_by_slug(db, slug)
+    sid = uuid.UUID(scope_id) if scope_id else None
+    if scope_type:
+        page = await wiki_service.get_page_by_slug(db, slug, scope_type=scope_type, scope_id=sid)
+    else:
+        page = await wiki_service.get_page_by_slug(db, slug)
+        if not page:
+            page = await wiki_service.get_page_by_slug_any_scope(db, slug)
     if not page:
         raise HTTPException(404, f"Wiki page not found: {slug}")
 
@@ -485,9 +498,11 @@ async def delete_wiki_page(
         raise HTTPException(403, "Only admins can delete wiki pages")
 
     deleted_title = page.title
+    deleted_scope_type = page.scope_type or "global"
+    deleted_scope_id = page.scope_id
     await log_audit(db, user, "delete", "wiki", slug, reason=deleted_title)
     await wiki_service.delete_page_cascade(db, slug)
-    await wiki_service.regenerate_index(db)
+    await wiki_service.regenerate_index(db, scope_type=deleted_scope_type, scope_id=deleted_scope_id)
     await wiki_service.append_log(db, f"Deleted page: {deleted_title} ({slug})")
     await db.commit()
     return {"ok": True, "deleted_slug": slug}

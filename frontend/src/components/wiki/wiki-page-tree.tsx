@@ -95,7 +95,8 @@ export function WikiPageTree({
     loadPages();
   }, [loadPages]);
 
-  const handleDelete = async (slug: string) => {
+  const handleDelete = async (page: WikiPageSummary) => {
+    const slug = page.slug;
     // First click: arm; second click: execute
     if (armedSlug !== slug) {
       setArmedSlug(slug);
@@ -104,7 +105,15 @@ export function WikiPageTree({
     setArmedSlug(null);
     setDeletingSlug(slug);
     try {
-      await api(`/api/wiki/pages/${encodeURIComponent(slug)}`, { method: "DELETE" });
+      // Pass scope so the backend deletes the right copy when the same slug
+      // exists in multiple scopes (e.g. global + project).
+      const scopeQs =
+        page.scope_type && page.scope_type !== "global" && page.scope_id
+          ? `?scope_type=${page.scope_type}&scope_id=${page.scope_id}`
+          : "";
+      await api(`/api/wiki/pages/${encodeURIComponent(slug)}${scopeQs}`, {
+        method: "DELETE",
+      });
       loadPages();
       onDeleted?.();
     } catch (err) {
@@ -309,7 +318,7 @@ export function WikiPageTree({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleDelete(page.slug);
+              handleDelete(page);
             }}
             className="shrink-0 mr-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 animate-pulse transition-colors"
             title={`Click again to confirm delete "${page.title}"`}
@@ -321,7 +330,7 @@ export function WikiPageTree({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              handleDelete(page.slug);
+              handleDelete(page);
             }}
             className="shrink-0 mr-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
             title={`Delete "${page.title}"`}
