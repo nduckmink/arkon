@@ -123,6 +123,12 @@ export default function WikiQueuePage() {
         }
         action={
           <div className="flex items-center gap-2">
+            <Link href="/wiki/review" prefetch={false}>
+              <Button variant="outline" size="sm" className="gap-1.5" title="Open review console (3-pane, keyboard shortcuts)">
+                <span className="material-symbols-outlined text-base">dashboard</span>
+                Open review console
+              </Button>
+            </Link>
             <select
               value={status}
               onChange={(e) => {
