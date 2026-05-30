@@ -48,6 +48,10 @@ dependencies = [
     "mammoth>=1.12.0",
     # Tokenization (extraction token count for upload gate)
     "tiktoken>=0.8.0",
+    # Spreadsheet extraction (arkon-spreadsheet skill)
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "tabulate>=0.9",
 ]
 
 [project.optional-dependencies]

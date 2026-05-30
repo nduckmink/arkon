@@ -78,6 +78,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
     from app.services.kb_service import (
         _extract_text_from_file,
         _inline_image_markers,
+        enrich_with_translation,
     )
     from app.services.source_outline import assemble_full_text, build_outline
     from app.services.storage_service import storage_service
@@ -109,7 +110,15 @@ async def ingest_file_task(ctx: dict, source_id: str):
 
             # --- Step 2: Extract text per page (25%) ---
             await tracker.update(15, "Extracting text (per page)...")
-            pages_data = await _extract_text_from_file(file_data, file_name)
+            # Resolve vision provider for OCR fallback on image-only PDFs
+            vision_provider = None
+            try:
+                from app.ai.registry import ProviderRegistry
+                registry = ProviderRegistry(session)
+                vision_provider = await registry.get_vision()
+            except Exception:
+                pass  # OCR fallback unavailable — continue without it
+            pages_data = await _extract_text_from_file(file_data, file_name, vision_provider=vision_provider)
 
             if not pages_data or not any((p.get("content") or "").strip() for p in pages_data):
                 source.status = "error"
@@ -119,6 +128,17 @@ async def ingest_file_task(ctx: dict, source_id: str):
                 return {"status": "error", "message": "No text content"}
 
             await tracker.update(25, "Text extraction complete")
+
+            # --- Step 2b: Translate Vietnamese-only pages (28%) ---
+            try:
+                from app.ai.registry import ProviderRegistry as _Reg
+                _reg = _Reg(session)
+                _llm = await _reg.get_llm()
+                await tracker.update(26, "Checking for Vietnamese content...")
+                pages_data = await enrich_with_translation(pages_data, _llm)
+                await tracker.update(28, "Translation enrichment done")
+            except Exception as e:
+                logger.warning(f"Translation enrichment skipped for {source_id}: {e}")
 
             # --- Step 3: Extract images (40%) ---
             # Captioning is offloaded to caption_images_task (enqueued below) so
