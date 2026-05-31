@@ -51,6 +51,7 @@ dependencies = [
     # Spreadsheet extraction (arkon-spreadsheet skill)
     "pandas>=2.0",
     "openpyxl>=3.1",
+    "xlrd>=2.0",
     "tabulate>=0.9",
 ]
 

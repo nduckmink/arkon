@@ -342,6 +342,45 @@ async def _extract_text_from_file(
         return [{"content": "", "page_number": 1}]
 
 
+async def auto_categorize_source(
+    title: str,
+    text_preview: str,
+    llm_provider,
+) -> str:
+    """Classify a source into a knowledge type using LLM analysis.
+
+    Returns one of: customer, product, sop, project, general
+    """
+    prompt = f"""Classify this document into exactly ONE category.
+
+Categories:
+- customer: Purchase orders, contracts, invoices, COAs, customer correspondence, pricing agreements
+- product: Bag specifications, drawings, labels, fabric tests, model definitions, production specs
+- sop: Procedures, work instructions, quality manuals, ISO documents, certifications, audits
+- project: Order deployments (VIN-XXX), project plans, timelines, deployment summaries
+- general: Company info, catalogs, website content, org charts, everything else
+
+Document title: {title}
+First 1500 chars:
+{text_preview[:1500]}
+
+Reply with ONLY the category name (one word, lowercase). Nothing else."""
+
+    try:
+        result = await llm_provider.generate(
+            prompt=prompt,
+            system="You are a document classifier. Reply with exactly one word.",
+            max_tokens=10,
+            temperature=0,
+        )
+        category = result.strip().lower().split()[0] if result else "general"
+        valid = {"customer", "product", "sop", "project", "general"}
+        return category if category in valid else "general"
+    except Exception as e:
+        logger.warning(f"Auto-categorize failed for '{title}': {e}")
+        return "general"
+
+
 async def enrich_with_translation(
     pages_data: list[dict],
     llm_provider,

@@ -78,6 +78,7 @@ async def ingest_file_task(ctx: dict, source_id: str):
     from app.services.kb_service import (
         _extract_text_from_file,
         _inline_image_markers,
+        auto_categorize_source,
         enrich_with_translation,
     )
     from app.services.source_outline import assemble_full_text, build_outline
@@ -129,7 +130,27 @@ async def ingest_file_task(ctx: dict, source_id: str):
 
             await tracker.update(25, "Text extraction complete")
 
-            # --- Step 2b: Translate Vietnamese-only pages (28%) ---
+            # --- Step 2b: Auto-categorize source (26%) ---
+            if not source.knowledge_type_id:
+                try:
+                    from app.ai.registry import ProviderRegistry as _RegCat
+                    _reg_cat = _RegCat(session)
+                    _llm_cat = await _reg_cat.get_llm()
+                    full_preview = " ".join(p.get("content", "") for p in pages_data)
+                    category = await auto_categorize_source(file_name, full_preview, _llm_cat)
+                    from app.database.models import KnowledgeType
+                    from sqlalchemy import select
+                    kt = (await session.execute(
+                        select(KnowledgeType).where(KnowledgeType.slug == category)
+                    )).scalar_one_or_none()
+                    if kt:
+                        source.knowledge_type_id = kt.id
+                        await session.flush()
+                        logger.info(f"Auto-categorized {source_id} as '{category}'")
+                except Exception as e:
+                    logger.warning(f"Auto-categorize skipped for {source_id}: {e}")
+
+            # --- Step 2c: Translate Vietnamese-only pages (28%) ---
             try:
                 from app.ai.registry import ProviderRegistry as _Reg
                 _reg = _Reg(session)
