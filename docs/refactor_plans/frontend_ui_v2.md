@@ -59,20 +59,23 @@ Employees get a dedicated workspace called **"My Contributions"** to manage thei
 
 ---
 
-## 4. Pure Notion-Inspired Light Theme & Micro-Transitions
+## 4. Pure "Sahara" Warm Minimalism Theme & Micro-Transitions
 
-Following a clean, high-focus design language similar to Notion, we prioritize a highly polished **Light Theme** and discard dark mode default assumptions.
+Following the project's core design system defined in [DESIGN.md](file:///c:/Users/Admin/Documents/arkon/DESIGN.md) ("Sahara — Warm Minimalism"), the workspace theme avoids cold stark whites and standard grays, embedding a sun-baked editorial feel:
 
 ### 1. Color Palette:
-*   **Editor Canvas & Reader (Workspace):** Pure porcelain white (`#ffffff`) to maximize focus and contrast.
-*   **Sidebar & Switchers (Navigation):** Soft, muted gray-blue (`#f7f9fb` or `#f1f3f5`) to clearly separate hierarchy from content without visual noise.
-*   **Text Hierarchy:** Deep charcoal/warm-dark gray (`#37352f` - identical to Notion's text color) instead of harsh pure black. This provides a warm, readable contrast that prevents eye strain during long reading sessions.
-*   **Borders & Dividers:** Ultra-thin, soft borders (`#e2e8f0` or `#e8ecef`) to define boundaries elegantly.
+*   **Editor Canvas & Reader (Workspace):** Warm linen (`#faf5ee`) to act as the primary, soothing workspace background.
+*   **Sidebar & Switchers (Navigation):** Soft warm off-white (`#fdfbf7` or slightly lighter linen tint) to separate hierarchy cleanly without relying on cool/blue grays.
+*   **Primary Accent & Focus States:** Burnt sienna (`#c2652a`) for active CTAs, selected items, highlight icons, and focus outlines.
+*   **Text Hierarchy:** Warm dark-charcoal (`#3a302a`) instead of harsh pure black, ensuring comfort for long reading sessions.
+*   **Borders & Dividers:** Thin and warm (`#d8d0c8` at 60% opacity) for elegant, low-contrast separation.
 
-### 2. Layout Aesthetics:
-*   **Subtle Shadows:** Minimal card elevations using soft ambient shadows (e.g., `shadow-sm` or custom `0 1px 3px rgba(0,0,0,0.05)`) to keep the interface flat and modern.
-*   **Active States:** Selected navigation items use a light background tint (`#eff6ff` or `#f3f4f6`) with matching subtle text color shifts.
+### 2. Typography Pairing:
+*   **Headlines & Page Titles:** `EB Garamond` (elegant serif) for large, luxury editorial style.
+*   **Body Text & Sidebar Labels:** `Manrope` (geometric sans-serif) for clean, highly-readable modern contrast.
 
-### 3. Fluid Micro-Transitions:
-*   **Hardware-Accelerated Springs:** Sidebars toggle open, space switchers pivot, and draft cards animate using smooth spring physics (e.g., Framer Motion or Radix transitions) to make the workspace feel reactive and premium.
+### 3. Layout Aesthetics & Transitions:
+*   **Subtle Elevation:** Ultra-soft warm shadows: `0 2px 16px rgba(58, 48, 42, 0.04)`. Pinned cards have minimum borders and generous padding (28-32px).
+*   **Active States:** Selected items use a soft sienna-tinted background or warm linen highlight with matching sienna icons.
+*   **Micro-Transitions:** Spring-loaded physics for collapsible sidebars and transition animations, keeping the workspace responsive and fluid.
 
