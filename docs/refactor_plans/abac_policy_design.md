@@ -67,3 +67,28 @@ To avoid querying Postgres on every single API request, the JWT access token enc
 *   `department_ids` (Direct Team Spaces the user belongs to)
 
 This payload is injected directly into `UserIdentity` at the middleware layer. Any hierarchal verification (checking if one team is a parent of another) is resolved dynamically in the database only when entering a `Team Space`.
+
+---
+
+## 4. Space-Scoped & Hierarchical Categories
+
+To keep categorization relevant and organized, categories (or knowledge types) are managed on two levels:
+
+### 1. Database Schema:
+```sql
+CREATE TABLE categories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    color VARCHAR(7) DEFAULT '#3b82f6' NOT NULL,
+    namespace_id UUID REFERENCES namespaces(id) ON DELETE CASCADE -- Nullable for Global Categories
+);
+```
+
+### 2. Category Scope:
+*   **Global Categories (`namespace_id IS NULL`):** Managed by System Admins, applicable to all spaces (e.g., `Regulation`, `Procedure`, `Template`).
+*   **Space Categories (`namespace_id` defined):** Managed by Space Owners (Team Leads, Group Leads), only visible and selectable within that specific Space (e.g., Tech Space has `API Doc`, HR Space has `Benefits`).
+
+### 3. Bulk & Hierarchical Assignment:
+*   **Hierarchical Inheritance:** If a parent page `/tech/runbooks` is tagged with category `Runbook`, all child pages under it (`/tech/runbooks/deploy`, `/tech/runbooks/backup`) automatically inherit the `Runbook` category unless explicitly overridden by a specific child-level tag.
+*   **Bulk Assignment API:** Provides a path to update multiple page categories simultaneously by passing a list of page IDs or a slug wildcard prefix (e.g., apply category `HR Policy` to `/hr/policies/*`).
+
