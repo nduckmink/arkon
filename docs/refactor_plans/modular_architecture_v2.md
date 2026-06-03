@@ -59,9 +59,17 @@ To allow collaborative authoring while keeping the main Wiki index stable, we im
 *   Instead of treating a branch as a monolithic block, a branch acts as a **Container of Proposed Changes (Drafts)**.
 *   Each page modification inside a branch is saved as a `WikiPageDraft` with its own independent lifecycle:
     `status` $\in$ (`in_progress`, `ready_for_review`, `approved`, `rejected`)
+*   **Comprehensive State Versioning (Strict isolation of page properties):**
+    A draft does NOT just version the markdown text (`content_md`). It captures the **entire state** of the proposed page. Any change to a published page's metadata remains isolated in the draft until merged. The versioned attributes inside a draft include:
+    *   `content_md` (The page body).
+    *   `title` and `slug` (Page navigation schema).
+    *   `category_id` (The dynamic classification page type).
+    *   `maturity_status` (The node maturity state: `seed`, `developing`, `mature`, `evergreen`).
+    *   `associated_source_ids` (Source document links).
+    *   `outbound_link_slugs` (Wiki-graph directional outlinks).
 
 ### 1. Selective Submit Flow:
-A contributor can modify multiple pages (e.g., Pages 1 to 6) in a single branch but only submit a subset (e.g., Pages 1 to 3) for leader review.
+A contributor can modify multiple pages (e.g., Pages 1 to 6, altering their text, outlinks, and maturity) in a single branch but only submit a subset (e.g., Pages 1 to 3) for leader review.
 
 *   **Logic:**
     1.  The contributor edits Pages 1-6. All drafts are created with `status = 'in_progress'`.
