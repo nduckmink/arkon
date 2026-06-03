@@ -59,8 +59,20 @@ Employees get a dedicated workspace called **"My Contributions"** to manage thei
 
 ---
 
-## 4. Modern Glassmorphism & Micro-Animations
+## 4. Pure Notion-Inspired Light Theme & Micro-Transitions
 
-*   **Deep Dark Palette:** Implements HSL slate-dark tones (e.g., `#080c14` for background, `#0f172a` for cards) combined with deep borders and zero pure-blacks.
-*   **Glassmorphism Overlays:** Header rails, dropdowns, and modal dialogs use background blur (`backdrop-blur-md`) with semi-transparent borders for a premium, premium feel.
-*   **Fluid Transitions:** Menu collapsals, drag-and-drop actions, and page transitions use hardware-accelerated spring animations (e.g., via Framer Motion) to feel responsive and alive.
+Following a clean, high-focus design language similar to Notion, we prioritize a highly polished **Light Theme** and discard dark mode default assumptions.
+
+### 1. Color Palette:
+*   **Editor Canvas & Reader (Workspace):** Pure porcelain white (`#ffffff`) to maximize focus and contrast.
+*   **Sidebar & Switchers (Navigation):** Soft, muted gray-blue (`#f7f9fb` or `#f1f3f5`) to clearly separate hierarchy from content without visual noise.
+*   **Text Hierarchy:** Deep charcoal/warm-dark gray (`#37352f` - identical to Notion's text color) instead of harsh pure black. This provides a warm, readable contrast that prevents eye strain during long reading sessions.
+*   **Borders & Dividers:** Ultra-thin, soft borders (`#e2e8f0` or `#e8ecef`) to define boundaries elegantly.
+
+### 2. Layout Aesthetics:
+*   **Subtle Shadows:** Minimal card elevations using soft ambient shadows (e.g., `shadow-sm` or custom `0 1px 3px rgba(0,0,0,0.05)`) to keep the interface flat and modern.
+*   **Active States:** Selected navigation items use a light background tint (`#eff6ff` or `#f3f4f6`) with matching subtle text color shifts.
+
+### 3. Fluid Micro-Transitions:
+*   **Hardware-Accelerated Springs:** Sidebars toggle open, space switchers pivot, and draft cards animate using smooth spring physics (e.g., Framer Motion or Radix transitions) to make the workspace feel reactive and premium.
+
