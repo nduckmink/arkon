@@ -70,11 +70,16 @@ This payload is injected directly into `UserIdentity` at the middleware layer. A
 
 ---
 
-## 4. Space-Scoped & Hierarchical Categories
+## 4. Categories as Pure Classification Metadata (Dynamic Page Types)
 
-To keep categorization relevant and organized, categories (or knowledge types) are managed on two levels:
+Categories (formerly hardcoded `page_types` like `index`, `concept`) act strictly as **classification labels (tags)**. They dictate how content is displayed (UI organization) and searched (AI RAG filtering), but play **no role** in authorization (which is managed exclusively by the Namespace and ABAC Rules).
 
-### 1. Database Schema:
+### 1. Purpose & Application:
+*   **UI Dynamic Views (Notion-like Tabs):** Within a single Space (e.g., `Team: Tech`), pages can be grouped and filtered by category tabs on the frontend (e.g., a "Runbooks" tab showing 5 pages, an "API Specs" tab showing 6 pages).
+*   **RAG Precision (AI Filters):** When an AI Agent searches for knowledge, it can restrict searches via metadata filtering (e.g., calling `search_wiki(query="...", category="Runbook")`), preventing outdated discussion drafts or policy documents from polluting the context window.
+*   **Custom Review Rules:** While categories don't block read/write access, they can trigger workflow rules. For example, a page tagged as `Official Policy` might require a formal review pipeline, whereas a page tagged as `Meeting Notes` can be merged directly without review.
+
+### 2. Database Schema:
 ```sql
 CREATE TABLE categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -84,11 +89,11 @@ CREATE TABLE categories (
 );
 ```
 
-### 2. Category Scope:
-*   **Global Categories (`namespace_id IS NULL`):** Managed by System Admins, applicable to all spaces (e.g., `Regulation`, `Procedure`, `Template`).
-*   **Space Categories (`namespace_id` defined):** Managed by Space Owners (Team Leads, Group Leads), only visible and selectable within that specific Space (e.g., Tech Space has `API Doc`, HR Space has `Benefits`).
+### 3. Category Administration:
+*   **Global Categories (`namespace_id IS NULL`):** Global tags managed by System Admins, applicable to all spaces (e.g., `Template`, `Announcement`).
+*   **Space-Scoped Categories (`namespace_id` defined):** Custom tags created by Space Owners, only visible and selectable within that specific Space (e.g., Tech Space has `API Spec`, HR Space has `Onboarding`).
 
-### 3. Bulk & Hierarchical Assignment:
+### 4. Bulk & Hierarchical Assignment:
 *   **Hierarchical Inheritance:** If a parent page `/tech/runbooks` is tagged with category `Runbook`, all child pages under it (`/tech/runbooks/deploy`, `/tech/runbooks/backup`) automatically inherit the `Runbook` category unless explicitly overridden by a specific child-level tag.
 *   **Bulk Assignment API:** Provides a path to update multiple page categories simultaneously by passing a list of page IDs or a slug wildcard prefix (e.g., apply category `HR Policy` to `/hr/policies/*`).
 
