@@ -51,27 +51,36 @@ Instead of declaring all tools in `app/mcp/tools.py`, a scanner automatically lo
 
 ---
 
-## 3. Wiki Branching & Selective Merging
+## 3. Wiki Branching & Contribution Lifecycle
 
-To allow collaborative authoring while keeping the main Wiki index stable, we implement a Git-like branching strategy but allow **Selective Merging** (Cherry-pick approvals) at the page/draft level.
+To allow collaborative authoring while keeping the main Wiki index stable, we implement a Git-like branching strategy but allow **Selective Submissions** and **Selective Merging** (Cherry-pick approvals) at the page/draft level.
 
 ### Concept:
-*   Instead of merging a whole branch (which might contain 3 complete pages and 1 half-written page), a branch is treated as a **Container of Proposed Changes (Drafts)**.
-*   Each page modification inside a branch is saved as a `WikiPageDraft` containing a state (`draft`, `ready_for_review`, `approved`, `rejected`).
+*   Instead of treating a branch as a monolithic block, a branch acts as a **Container of Proposed Changes (Drafts)**.
+*   Each page modification inside a branch is saved as a `WikiPageDraft` with its own independent lifecycle:
+    `status` $\in$ (`in_progress`, `ready_for_review`, `approved`, `rejected`)
 
-### How Selective Merging Works:
+### 1. Selective Submit Flow:
+A contributor can modify multiple pages (e.g., Pages 1 to 6) in a single branch but only submit a subset (e.g., Pages 1 to 3) for leader review.
+
+*   **Logic:**
+    1.  The contributor edits Pages 1-6. All drafts are created with `status = 'in_progress'`.
+    2.  The contributor selects Pages 1-3 and clicks **"Submit Selection for Review"**.
+    3.  The system updates only Drafts 1-3 to `status = 'ready_for_review'`.
+    4.  Drafts 4-6 remain `in_progress`, invisible to the reviewer.
+
+### 2. Selective Merging Flow:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    Contributor ->> Branch: Edit Page A (creates Draft A)
-    Contributor ->> Branch: Edit Page B (creates Draft B)
-    Contributor ->> Branch: Submit Branch for Review
+    Contributor ->> Branch: Edit Page A (Draft A: in_progress)
+    Contributor ->> Branch: Edit Page B (Draft B: in_progress)
+    Contributor ->> Branch: Submit Page A only (Draft A: ready_for_review)
     Lead ->> Branch: Reviews Draft A (Approve)
-    Lead ->> Branch: Reviews Draft B (Requires revision)
     Lead ->> Branch: Clicks "Publish Approved Changes"
     Branch ->> Wiki: Merges ONLY Draft A into main wiki_pages
-    Branch ->> Branch: Keeps Draft B in "draft" status for future edits
+    Branch ->> Branch: Keeps Draft B in "in_progress" status for future edits
 ```
 
 ### Database Implementation of Selective Merge:
@@ -92,10 +101,24 @@ async def publish_approved_drafts_from_branch(db: AsyncSession, branch_id: uuid.
         # 2. Upsert each approved draft into the live wiki_pages table
         await merge_draft_to_page(db, draft)
         
-        # 3. Delete the draft from the branch or mark it as "merged"
+        # 3. Clean up the merged draft
         await db.delete(draft)
         
     # 4. Commit transaction
     await db.commit()
 ```
-*   **Result:** Draft A is merged into `main` and vanishes from the branch workspace. Draft B remains in the branch in "needs_revision" status, allowing the contributor to edit and resubmit it without blocking the deployment of Draft A.
+
+---
+
+## 4. Cross-Space Knowledge Promotion
+
+When a project concludes within a **Group Space** (Cross-functional virtual space), the lessons learned or finalized policies need to be "promoted" to a **Team Space** (Department) or the **Global Space** (Company core).
+
+### Promotion Protocol:
+Since spaces have different security boundaries, data cannot simply be copied without audit. We implement **Cross-Space Promotion Requests**:
+
+1.  **Request Initiation:** The Group Owner selects pages in `Group Space A` and selects **"Promote to Space"**, specifying the target space (e.g., `Global Space` or `Team: Tech`).
+2.  **Cross-Space Draft Generation:** The system duplicates the selected pages as `WikiPageDraft` records, but pointing to the `target_space_id`.
+3.  **Governance Gate:** A notification is dispatched to the Admin/Knowledge Manager of the target space. 
+4.  **Publishing:** Once approved, the page is merged into the target space's live index and automatically inherits the target space's ABAC permissions.
+
