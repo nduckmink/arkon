@@ -40,42 +40,63 @@ from app.ai.providers.base import (
 # Provider class mappings — add new providers here
 # ---------------------------------------------------------------------------
 
+
 def _get_embedding_class(provider: ProviderType) -> type[EmbeddingProvider]:
     if provider == ProviderType.GOOGLE:
         from app.ai.providers.google import GoogleEmbedding
+
         return GoogleEmbedding
     elif provider == ProviderType.OPENAI:
         from app.ai.providers.openai_provider import OpenAIEmbedding
+
         return OpenAIEmbedding
+    elif provider == ProviderType.LITELLM:
+        from app.ai.providers.litellm_provider import LiteLLMEmbedding
+
+        return LiteLLMEmbedding
     raise ValueError(f"Unsupported embedding provider: {provider}")
 
 
 def _get_llm_class(provider: ProviderType) -> type[LLMProvider]:
     if provider == ProviderType.GOOGLE:
         from app.ai.providers.google import GoogleLLM
+
         return GoogleLLM
     elif provider == ProviderType.OPENAI:
         from app.ai.providers.openai_provider import OpenAILLM
+
         return OpenAILLM
     elif provider == ProviderType.ANTHROPIC:
         from app.ai.providers.anthropic_provider import AnthropicLLM
+
         return AnthropicLLM
+    elif provider == ProviderType.LITELLM:
+        from app.ai.providers.litellm_provider import LiteLLMChat
+
+        return LiteLLMChat
     raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
 def _get_vision_class(provider: ProviderType) -> type[VisionProvider]:
     if provider == ProviderType.GOOGLE:
         from app.ai.providers.google import GoogleVision
+
         return GoogleVision
     elif provider == ProviderType.OPENAI:
         from app.ai.providers.openai_provider import OpenAIVision
+
         return OpenAIVision
+    elif provider == ProviderType.LITELLM:
+        from app.ai.providers.litellm_provider import LiteLLMVision
+
+        return LiteLLMVision
     raise ValueError(f"Unsupported vision provider: {provider}")
 
 
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
+
 
 class ProviderRegistry:
     """
@@ -313,6 +334,7 @@ _PROVIDER_LABELS = {
     "ollama": "Ollama",
     "voyage": "Voyage AI",
     "cohere": "Cohere",
+    "litellm": "LiteLLM",
 }
 
 

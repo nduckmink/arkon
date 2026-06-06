@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 # Provider enum — add new providers here
 # ---------------------------------------------------------------------------
 
+
 class ProviderType(str, Enum):
     GOOGLE = "google"
     OPENAI = "openai"
@@ -25,11 +26,13 @@ class ProviderType(str, Enum):
     OLLAMA = "ollama"
     VOYAGE = "voyage"
     COHERE = "cohere"
+    LITELLM = "litellm"
 
 
 # ---------------------------------------------------------------------------
 # Runtime config loaded from DB
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ProviderConfig:
@@ -42,18 +45,20 @@ class ProviderConfig:
     need capability metadata (context window, supports_tools, ...) read it
     from `config.spec` rather than hard-coding per model_id.
     """
+
     provider: ProviderType
     api_key: str = ""
     model_id: str = ""
-    base_url: Optional[str] = None      # For Ollama, Azure, proxies
-    dimensions: Optional[int] = None    # Embedding output dimensions
+    base_url: Optional[str] = None  # For Ollama, Azure, proxies
+    dimensions: Optional[int] = None  # Embedding output dimensions
     extra: dict = field(default_factory=dict)  # Provider-specific params
-    spec: Optional[object] = None        # LLMModelSpec | VisionModelSpec | EmbeddingModelSpec
+    spec: Optional[object] = None  # LLMModelSpec | VisionModelSpec | EmbeddingModelSpec
 
 
 # ---------------------------------------------------------------------------
 # Embedding
 # ---------------------------------------------------------------------------
+
 
 class EmbeddingProvider(ABC):
     """Generate vector embeddings for text."""
@@ -91,6 +96,7 @@ class EmbeddingProvider(ABC):
 # LLM (text generation)
 # ---------------------------------------------------------------------------
 
+
 class LLMProvider(ABC):
     """Generate text — used for summarization, webhook gateway, etc."""
 
@@ -127,13 +133,13 @@ class LLMProvider(ABC):
         )
 
     @abstractmethod
-    async def test_connection(self) -> tuple[bool, str]:
-        ...
+    async def test_connection(self) -> tuple[bool, str]: ...
 
 
 # ---------------------------------------------------------------------------
 # Vision (image analysis)
 # ---------------------------------------------------------------------------
+
 
 class VisionProvider(ABC):
     """Analyze images — used during document ingestion for image captioning."""
@@ -152,5 +158,4 @@ class VisionProvider(ABC):
         ...
 
     @abstractmethod
-    async def test_connection(self) -> tuple[bool, str]:
-        ...
+    async def test_connection(self) -> tuple[bool, str]: ...
