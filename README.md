@@ -1,5 +1,7 @@
 # Arkon - The Open-Source Enterprise AI Knowledge Hub & MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fnduckmink%2Farkon.svg)](https://mcptoplist.com/server/glama%2Fnduckmink%2Farkon)
+
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-PolyForm_Internal_Use_1.0.0-blue.svg" alt="License"></a>
   <a href="https://github.com/nduckmink/arkon/stargazers"><img src="https://img.shields.io/github/stars/nduckmink/arkon.svg" alt="GitHub Stars"></a>
