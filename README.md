@@ -199,7 +199,7 @@ For stronger enforcement, create a **Project** in Claude Desktop, attach Arkon a
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=nduckmink/arkon&type=Date)](https://star-history.com/#nduckmink/arkon&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=nduckmink/arkon&type=Date)](https://star-history.dera.page/#nduckmink/arkon&Date)
 
 ---
 
