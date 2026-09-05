@@ -28,7 +28,7 @@ Be respectful, constructive, and professional. We want Arkon to be a welcoming s
 
 | Tool       | Version    | Purpose                           |
 |------------|------------|-----------------------------------|
-| Python     | 3.11 – 3.12 | Backend runtime                 |
+| Python     | 3.11 – 3.13 | Backend runtime                 |
 | Node.js    | 20+        | Frontend (Next.js)                |
 | PostgreSQL | 15+        | Main database (with pgvector)     |
 | Redis      | 7+         | Background job queue              |
@@ -59,8 +59,8 @@ Be respectful, constructive, and professional. We want Arkon to be a welcoming s
 3. **Environment:**
 
    ```bash
-   cp .env.local.example .env.local
-   # Edit .env.local with your local values (see docs/HOW_TO_RUN.md for details)
+   cp .env.local.example .env
+   # Edit .env with your local values (see docs/HOW_TO_RUN.md for details)
    ```
 
 4. **Database:**
