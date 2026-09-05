@@ -6,7 +6,7 @@ authors = [
     {name = "Arkon Team"}
 ]
 readme = "README.md"
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     # Web framework
     "fastapi>=0.104.0",

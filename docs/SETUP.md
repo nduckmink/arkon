@@ -343,7 +343,7 @@ docker compose --env-file .env.docker up -d --build
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Python | 3.11 – 3.14 | Backend runtime |
+| Python | 3.11 – 3.13 | Backend runtime |
 | Node.js | 20+ | Frontend (Next.js) |
 | PostgreSQL | 15+ with pgvector | Main database |
 | Redis | 7+ | Background job queue |
@@ -376,7 +376,7 @@ docker run -d --name arkon-minio \
 ### 2. Configure environment
 
 ```bash
-cp .env.local.example .env.local
+cp .env.local.example .env
 ```
 
 For local development, the defaults in `.env.local.example` work out of the box except:
@@ -525,7 +525,7 @@ AI provider settings (embedding, LLM, vision, API keys) are configured through t
 | Documents stuck at `pending` | Wiki worker not running |
 | Wiki pages not created after upload | Check LLM config in Settings; check worker logs |
 | Frontend shows API error | Backend not running, or `NEXT_PUBLIC_API_URL` incorrect |
-| CORS errors in browser | Add frontend URL to `CORS_ORIGINS` in `.env.docker` (or `.env.local` for dev) |
+| CORS errors in browser | Add frontend URL to `CORS_ORIGINS` in `.env.docker` (or `.env` for dev) |
 | `requires Python 3.11` | Use `py -3.11 -m venv .venv` to select correct version |
 | MCP connection refused | Ensure the API is accessible from outside (check firewall/proxy) |
 | OAuth "Couldn't connect" in Claude Desktop | Server not reachable, or `/.well-known/oauth-authorization-server` returning 404 — verify the API is running and Nginx is routing correctly |
