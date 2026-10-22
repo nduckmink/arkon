@@ -150,6 +150,10 @@ Arkon runs **7 Docker containers** (PostgreSQL + pgvector, Redis, MinIO, FastAPI
 
 → See [Setup Guide](docs/SETUP.md) for development mode and the full env reference.
 
+### ⚡ One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Arkon/)
+
 ---
 
 ## 🔗 Connecting Claude
